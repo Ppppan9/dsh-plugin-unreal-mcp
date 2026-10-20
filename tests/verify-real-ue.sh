@@ -169,14 +169,20 @@ ctx.plugin(spMod.default ?? spMod.SystemPrompt);  await new Promise(r=>setTimeou
 ctx.plugin(toolsMod.ToolRuntime);                  await new Promise(r=>setTimeout(r,120));
 ctx.plugin(skillMod.default ?? skillMod.SkillRegistry); await new Promise(r=>setTimeout(r,100));
 
-// 从**用户实际安装的 profile 软链**加载，确保验的是真交付物
-// 优先加载本仓库自身（开源仓库的标准验证方式）；
-// 也可以用 PROFILE_PLUGIN 环境变量指向 profile 里已安装的那份来做对比验证。
-const REPO_PLUGIN = new URL('../index.js', import.meta.url).href;
-const PROFILE_PLUGIN = process.env.PROFILE_PLUGIN || REPO_PLUGIN;
+// 插件入口由 shell 通过 PROFILE_PLUGIN 注入绝对路径：
+//   默认 = 本仓库自身的 index.js（开源仓库的标准验证方式）
+//   覆盖 = profile 里实际安装的那份，用于对比验证
+const PROFILE_PLUGIN = process.env.PROFILE_PLUGIN;
 let bundle;
+if (!PROFILE_PLUGIN) {
+  console.log('  FAIL  未指定插件入口：请设 PROFILE_PLUGIN 环境变量');
+  process.exit(1);
+}
 try { bundle = await import(PROFILE_PLUGIN); }
-catch (e) { console.log('  SKIP  插件未安装到 profile：' + PROFILE_PLUGIN); process.exit(0); }
+catch (e) {
+  console.log('  FAIL  无法加载插件入口 ' + PROFILE_PLUGIN + ': ' + e.message);
+  process.exit(1);
+}
 bundle.apply(ctx); await new Promise(r=>setTimeout(r,100));
 
 const skills = await ctx.get('skills').list({ cwd: process.cwd() });
@@ -240,21 +246,34 @@ if (found.returnValue?.length) {
 console.log(`\n  plugin: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
 MJS
-  run_node /tmp/_verify_plugin.mjs || fail=1
+  # 插件入口：优先 profile 里实际安装的那份，否则用本仓库自身
+  plugin_entry="${PROFILE_PLUGIN_OVERRIDE:-$HERE/../index.js}"
+  echo "  插件入口: $plugin_entry"
+  PROFILE_PLUGIN="$plugin_entry" run_node /tmp/_verify_plugin.mjs || fail=1
   echo
 fi
 
 # ── 汇总 ────────────────────────────────────────────────────────────────────
 bold "═══ 汇总 ═══"
-if [ "$fail" -eq 0 ]; then
-  green "✅ 真机验证全部通过"
-  echo
-  echo "已在本机真实 Unreal Editor 上确认："
-  echo "  · MCP server 线路契约（session 头 / 3 元工具 / 两个真实坑）"
-  echo "  · DSH 插件能把真引擎的工具注册为 mcp__unreal__*"
-  echo "  · 真实只读调用、真实写操作、真实删除清理"
-  exit 0
-else
+if [ "$fail" -ne 0 ]; then
   red "❌ 真机验证有失败项（见上方 FAIL 明细）"
   exit 1
 fi
+
+green "✅ 真机验证全部通过"
+echo
+echo "已在本机真实 Unreal Editor 上确认："
+ran_wire=0; ran_plugin=0
+[[ " ${TESTS[*]} " == *" wire "* ]] && ran_wire=1
+[[ " ${TESTS[*]} " == *" plugin "* ]] && ran_plugin=1
+if [ "$ran_wire" -eq 1 ]; then
+  echo "  · MCP server 线路契约（session 头 / 3 元工具 / 两个真实坑）"
+fi
+if [ "$ran_plugin" -eq 1 ]; then
+  echo "  · DSH 插件能把真引擎的工具注册为 mcp__unreal__*"
+  echo "  · 真实只读调用、真实写操作、真实删除清理"
+fi
+if [ "$ran_wire" -eq 0 ] && [ "$ran_plugin" -eq 0 ]; then
+  echo "  （未运行任何验证段落）"
+fi
+exit 0

@@ -147,8 +147,8 @@ for t in "${TESTS[@]}"; do
   t0=$(date +%s)
 
   # 同时打到屏幕和文件：屏幕给人看，文件用于抽取断言统计
-  run_node "$HERE/$file" 2>&1 | tee "$out_file"
-  rc=${PIPESTATUS[0]:-0}
+  rc=0
+  run_node "$HERE/$file" 2>&1 | tee "$out_file" || rc=$?
 
   t1=$(date +%s)
   dur=$((t1 - t0))

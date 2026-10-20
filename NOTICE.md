@@ -1,6 +1,6 @@
 # NOTICE
 
-`dsh-unreal-mcp` 是一个 **DSH（DeepSeek Harness）bundle**，把 Epic Games 的「Unreal MCP」
+`dsh-plugin-unreal-mcp` 是一个 **DSH（DeepSeek Harness）bundle**，把 Epic Games 的「Unreal MCP」
 能力接到 DSH 上。它由两部分组成：
 
 1. **配置**：`cordis.patch.yml` 里的一行，复用官方的 `@deepseek-ai/dsh-mcp-client` 直连

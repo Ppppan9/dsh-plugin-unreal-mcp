@@ -1,4 +1,4 @@
-# dsh-unreal-mcp
+# dsh-plugin-unreal-mcp
 
 > 让 **DeepSeek Harness（DSH）** 直接驱动 **Unreal Editor 5.8+**。
 > 通过逆向分析 Epic 官方为 Claude Code 发布的 Unreal MCP 插件制作而成。
@@ -79,10 +79,10 @@ bAutoStartServer=True
 
 ```bash
 # 本地安装
-dsh plugin --profile <你的 profile> add "link:/绝对路径/dsh-unreal-mcp"
+dsh plugin --profile <你的 profile> add "link:/绝对路径/dsh-plugin-unreal-mcp"
 
 # 或者发布到 npm 后
-dsh plugin --profile <你的 profile> add dsh-unreal-mcp
+dsh plugin --profile <你的 profile> add dsh-plugin-unreal-mcp
 ```
 
 `add` 会自动完成依赖安装和 bundle 选择，**不需要手工编辑 profile 配置**。
@@ -147,7 +147,16 @@ UE 默认开启 **Tool Search 模式**，所以 `tools/list` 里**只有 3 个�
 | 真实只读调用 | ✅ `get_current_level`、`find_actors` |
 | 真实写操作 | ✅ 创建/删除 actor、改属性 |
 | 真实截图 | ✅ `CaptureViewport` |
-| 蓝图节点图生成 + PIE 运行 | ✅ DSL 生成，日志与位置采样双重验证 |
+| ActorTools | ✅ 变换读写、标签、组件列表、look_at |
+| BlueprintTools | ✅ 创建蓝图、变量、函数+参数、DSL 节点图、编译、回读 |
+| Blueprint DSL | ✅ `bind` / `if` / `for` / `fn` 可用；`switch` 不生成节点（已记录边界） |
+| 蓝图 PIE 运行 | ✅ DSL 生成的图在 PIE 中真跑，日志 + 位置采样双重验证 |
+| MaterialTools | ✅ 创建材质、加表达式、列表达式、重编译 |
+| MaterialInstanceTools | ✅ 创建材质实例、参数读写 |
+| UMGToolSet | ✅ 创建 Widget BP、加 TextBlock、控件树、编译 |
+| SequencerTools | ✅ 创建 LevelSequence、播放范围、root folder、TransformTrack |
+| ProgrammaticToolset | ✅ Python 沙箱编排多工具；沙箱边界（白名单 6 模块、禁 `unreal`）已验证 |
+| Niagara / PCG / StateTree / ControlRig 等 | ⚠️ 工具面已枚举（Niagara 46 个、Sequencer 140 个），未做完整功能调用 |
 | 自动化测试 | ✅ mock 126 断言 + 真机 21 断言 |
 
 一键复跑：
@@ -251,7 +260,7 @@ bAutoStartServer=True
 DSH side:
 
 ```bash
-dsh plugin --profile <profile> add "link:/absolute/path/to/dsh-unreal-mcp"
+dsh plugin --profile <profile> add "link:/absolute/path/to/dsh-plugin-unreal-mcp"
 ```
 
 ## Usage

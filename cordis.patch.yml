@@ -1,4 +1,4 @@
-# dsh-unreal-mcp bundle patch —— 往 profile 的 entry list 顶部追加两行。
+# dsh-plugin-unreal-mcp bundle patch —— 往 profile 的 entry list 顶部追加两行。
 #
 # 两行各管一件事，互不依赖：
 #   1. unreal-mcp-client：官方的 @deepseek-ai/dsh-mcp-client，直连 Unreal 编辑器进程内的
@@ -40,5 +40,5 @@
           maxAttempts: 100000
 
     - id: unreal-mcp
-      name: 'dsh-unreal-mcp'
+      name: 'dsh-plugin-unreal-mcp'
       config: {}

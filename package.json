@@ -1,5 +1,5 @@
 {
-  "name": "dsh-unreal-mcp",
+  "name": "dsh-plugin-unreal-mcp",
   "version": "1.0.0",
   "type": "module",
   "description": "Drive a live Unreal Editor from DeepSeek Harness via Unreal's built-in ModelContextProtocol MCP server. Reverse-engineered from Epic's official Claude Code plugin.",
@@ -44,10 +44,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ppppan9/dsh-unreal-mcp.git"
+    "url": "git+https://github.com/Ppppan9/dsh-plugin-unreal-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/Ppppan9/dsh-unreal-mcp/issues"
+    "url": "https://github.com/Ppppan9/dsh-plugin-unreal-mcp/issues"
   },
-  "homepage": "https://github.com/Ppppan9/dsh-unreal-mcp#readme"
+  "homepage": "https://github.com/Ppppan9/dsh-plugin-unreal-mcp#readme"
 }

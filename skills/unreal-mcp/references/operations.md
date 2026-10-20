@@ -134,6 +134,48 @@ Web 侧边栏 **Plugins** → `Unreal Engine MCP` → 关掉再打开。
   root tile 还没加载完就解引用空指针 → SIGSEGV。对着 Cesium 的 actor 调 focus 之前先确认 tileset 已加载。
 - **UE Python Remote Execution 在 macOS 上会让编辑器启动卡死**（多播监听器），内存涨到 ~543MB 无响应。
   在 Mac 上别开 `bRemoteExecution`。
+- **Sequencer 的 Camera Cut 会崩编辑器（UE 5.8 真机复现）**：只要打开的 Level Sequence 里存在
+  `MovieSceneCameraCutTrack`，`FCameraCutTrackEditor::Tick` → `FSequencer::SetGlobalTime` →
+  MovieScene EntitySystem 求值就会踩
+  `Assertion failed: Header [Runtime/MovieScene/Public/EntitySystem/MovieSceneEntitySystemTypes.h] [Line: 717]`
+  然后 SIGSEGV。触发路径包括 `add_track_to_sequence('/Script/MovieSceneTracks.MovieSceneCameraCutTrack')`、
+  `create_camera`、`set_binding_name`（相机绑定）之后的任何一次时间求值。
+  → **用 MCP 建序列时不要加 camera cut track / 相机绑定**；`create_camera`、`set_camera_cut_binding`、
+  `set_camera_lock` 在没有真机安全网时不要调。
+
+## 崩溃之后：重启编辑器前必须先清理 Restore Packages 模态框
+
+UE 崩溃后重启会在 `EditorInit` 阶段弹一个 **"Restore Packages"** 模态框
+（`FPackageAutoSaver::OfferToRestorePackages` → `UEditorEngine::EditorAddModalWindow`）。
+这个模态框**阻塞 game thread**，于是 MCP server 的端口虽然还在 LISTEN，但每个 JSON-RPC 请求
+都会被 reset 或永远挂住 —— 但**编辑器本身看起来是开着的**，极容易误判成「MCP 坏了」。
+
+识别方法：
+
+```bash
+# 端口在 LISTEN，但请求被重置 / 超时
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+curl -s -m 5 -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"p","version":"1"}}}'
+# 返回 000 / 连接被 reset → 八成是模态框
+
+sample <editor-pid> 2 -file /tmp/sample.txt
+grep -A3 'PackageAutoSaver' /tmp/sample.txt      # 会看到 OfferToRestorePackages / EditorAddModalWindow
+```
+
+处理（两种，选一种）：
+
+1. **点掉模态框**（有 GUI 时最简单）：选 "Don't Restore"，编辑器立刻恢复响应。
+2. **无人值守时**：退出编辑器，把自动存档树移走，再重启：
+
+```bash
+kill -9 <editor-pid>
+mv "<Project>/Saved/Autosaves" "/tmp/Autosaves-backup"   # 里面有 PackageRestoreData.json
+open -a "<UE>/Engine/Binaries/Mac/UnrealEditor.app" --args "<abs>/<Project>.uproject"
+```
+
+转移而不是删除：自动存档里可能有用户没保存的关卡，交给用户自己决定要不要恢复。
 
 ## 崩溃日志在哪
 
@@ -154,7 +196,7 @@ Web 侧边栏 **Plugins** → `Unreal Engine MCP` → 关掉再打开。
 - **`ProgrammaticToolset.execute_tool_script` 是受限沙箱，不是通用 Python**：
   白名单模块只有 `json, math, datetime, copy, re, time`，没有 `unreal` 模块，没有 `eval/exec/compile`，
   `open()` 只读且限定工程目录，脚本必须定义 `run() -> dict`，唯一触达引擎的路径是
-  `execute_tool("<Toolset>.<Tool>", json_input)`，且运行在 transaction scope 内（可撤销）。
+  `execute_tool("<全限定工具名>", json_input)`（如 `editor_toolset.toolsets.scene.SceneTools.get_current_level`；传短名会报 `ToolsetIsNotRegistered`），且运行在 transaction scope 内（可撤销）。
   它**不能**任意改引擎状态，也不是「运行时加 UFUNCTION」的通道。
   （Epic 插件 README 里把它写成「executes arbitrary Python with full access」，那是按最坏情况假设的措辞，
   实际实现比这严。）

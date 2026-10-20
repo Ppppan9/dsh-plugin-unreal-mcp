@@ -254,7 +254,7 @@ try {
   });
 
   check('package.json: name / version / type / license', () => {
-    eq(pkg.name, 'dsh-unreal-mcp', 'name');
+    eq(pkg.name, 'dsh-plugin-unreal-mcp', 'name');
     eq(pkg.version, '1.0.0', 'version');
     eq(pkg.type, 'module', 'type');
     eq(pkg.license, 'MIT', 'license');
@@ -334,10 +334,10 @@ try {
     eq(client.name, '@deepseek-ai/dsh-mcp-client', 'client.name');
   });
 
-  check('patch 第二行是本 bundle 自己（dsh-unreal-mcp），且 config 为空对象', () => {
+  check('patch 第二行是本 bundle 自己（dsh-plugin-unreal-mcp），且 config 为空对象', () => {
     const self = patchDoc[0].insert.find((e) => e.id === 'unreal-mcp');
     ok(self, '应有 unreal-mcp 行');
-    eq(self.name, 'dsh-unreal-mcp', 'self.name');
+    eq(self.name, 'dsh-plugin-unreal-mcp', 'self.name');
     eq(self.config, {}, 'self.config');
   });
 

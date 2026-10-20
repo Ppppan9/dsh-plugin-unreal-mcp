@@ -1,6 +1,6 @@
 # 首次配置（DSH × Unreal MCP）
 
-这份文档只讲**编辑器侧**要做什么。DSH 侧的连接已经由 `dsh-unreal-mcp` bundle 配好了。
+这份文档只讲**编辑器侧**要做什么。DSH 侧的连接已经由 `dsh-plugin-unreal-mcp` bundle 配好了。
 
 ## 分工：谁配什么
 

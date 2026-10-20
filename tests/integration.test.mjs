@@ -120,12 +120,26 @@ async function waitFor(label, predicate, timeoutMs = 15_000, intervalMs = 100) {
   throw new Error(`等待超时 ${timeoutMs}ms: ${label}${last instanceof Error ? ` — ${last.message}` : ''}`);
 }
 
+/** 找一个当前空闲的本地端口（用于「先空端口、后起服务」的重连用例） */
+async function getFreePort() {
+  const net = await import('node:net');
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // mock 进程
 // ---------------------------------------------------------------------------
-function startMock({ logPath, env = {} } = {}) {
+function startMock({ logPath, env = {}, port = 0 } = {}) {
   return new Promise((resolve, reject) => {
-    const args = [MOCK, '0'];
+    const args = [MOCK, String(port)];
     if (logPath) args.push('--log', logPath);
     const child = spawn(process.execPath, args, {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', ...env },
@@ -793,6 +807,89 @@ try {
     eq(names.filter((n) => n.startsWith('mcp__unreal__')), [], '连不上时不应注册工具');
     console.log(`        连不上时可见工具数 = ${names.length}（无 mcp__unreal__*），未抛异常`);
     await ctx2.dispose?.();
+  });
+
+  // =========================================================================
+  // ⑦ UNREAL_MCP_PORT 环境变量真的能覆盖 patch 里的 url 表达式
+  // =========================================================================
+  group('⑦ UNREAL_MCP_PORT 覆盖 patch 的 !!js url 表达式');
+
+  await check('不设环境变量 → 回落 8000；设了 → 用该端口（表达式真的被求值，不是文本匹配）', () => {
+    const m = patchSource.match(/url:\s*!!js\s+'([^']+)'/);
+    ok(m, 'patch 中应存在 url: !!js \'...\' 形式');
+    const expr = m[1];
+    const evalWith = (val) => {
+      const saved = process.env.UNREAL_MCP_PORT;
+      if (val === undefined) delete process.env.UNREAL_MCP_PORT;
+      else process.env.UNREAL_MCP_PORT = val;
+      try {
+        return new Function('process', 'return (' + expr + ');')(process);
+      } finally {
+        if (saved === undefined) delete process.env.UNREAL_MCP_PORT;
+        else process.env.UNREAL_MCP_PORT = saved;
+      }
+    };
+    eq(evalWith(undefined), 'http://127.0.0.1:8000/mcp', '未设 UNREAL_MCP_PORT 时的 url');
+    eq(evalWith('8123'), 'http://127.0.0.1:8123/mcp', 'UNREAL_MCP_PORT=8123 时的 url');
+    eq(evalWith('9001'), 'http://127.0.0.1:9001/mcp', 'UNREAL_MCP_PORT=9001 时的 url');
+    console.log(`        表达式求值：默认 8000，覆盖 8123 / 9001 均正确`);
+  });
+
+  // =========================================================================
+  // ⑧ 编辑器后启动：mcp-client 自动重连并注册工具（真 server 事后出现）
+  // =========================================================================
+  group('⑧ 编辑器后启动：真 server 事后出现 → 自动重连，无需重启 DSH');
+
+  await checkAsync('先指向空端口（无工具）→ 起 mock → 自动拿到 3 个工具并真调用成功', async () => {
+    const freePort = await getFreePort();
+    const ctx3 = new cordis.Context();
+    ctx3.plugin(SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false });
+    await sleep(150);
+    ctx3.plugin(ToolRuntime, { mode: 'native' });
+    await waitFor('重连用例 Context 服务就绪', () => !!ctx3.systemPrompt && !!ctx3.tools);
+
+    ctx3.plugin(
+      mcp,
+      mcp.Config({
+        ...mcp.Config(patchedConfig),
+        url: `http://127.0.0.1:${freePort}/mcp`,
+        // 生产配置是 1000ms 起步 / 30s 封顶；这里只为加快测试而缩小，语义一致
+        reconnect: { enabled: true, initialDelayMs: 200, maxDelayMs: 800, maxAttempts: 1000 },
+      }),
+    );
+
+    await sleep(1500);
+    const before = [...ctx3.tools.view(undefined).visible.keys()].filter((n) => n.startsWith('mcp__unreal__'));
+    eq(before, [], '服务未起时不应注册任何 mcp__unreal__* 工具');
+    console.log(`        端口 ${freePort} 上没人监听：工具数 0，插件未抛异常`);
+
+    // 「编辑器后启动」= mock 在 DSH 已经空转过若干次重连之后才出现
+    const lateMock = await startMock({ port: freePort });
+    try {
+      await waitFor(
+        '自动重连后 3 个工具注册完成',
+        () => [...ctx3.tools.view(undefined).visible.keys()].filter((n) => n.startsWith('mcp__unreal__')).length === 3,
+        30_000,
+      );
+      const names = [...ctx3.tools.view(undefined).visible.keys()]
+        .filter((n) => n.startsWith('mcp__unreal__'))
+        .sort();
+      eq(
+        names,
+        ['mcp__unreal__call_tool', 'mcp__unreal__describe_toolset', 'mcp__unreal__list_toolsets'],
+        '重连后注册的工具名',
+      );
+
+      // 真调一次，证明不是只把名字注册上了
+      const def = ctx3.tools.view(undefined).visible.get('mcp__unreal__list_toolsets');
+      const res = await def.execute({}, { signal: new AbortController().signal });
+      const text = String(res?.content?.[0]?.text || '');
+      ok(text.length > 0, '重连后真调用 list_toolsets 应返回非空文本');
+      console.log(`        重连后 list_toolsets 返回 ${text.length} 字符`);
+    } finally {
+      await ctx3.dispose?.();
+      await stopMock(lateMock);
+    }
   });
 } catch (e) {
   failed++;

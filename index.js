@@ -1,5 +1,5 @@
 /**
- * dsh-unreal-mcp —— DSH Host 插件（纯 ESM，零第三方依赖）。
+ * dsh-plugin-unreal-mcp —— DSH Host 插件（纯 ESM，零第三方依赖）。
  *
  * 这个插件只做两件事，其余全部交给官方插件：
  *

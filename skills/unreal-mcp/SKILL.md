@@ -67,9 +67,19 @@ UE **不返回 `structuredContent`**，结果都在 `content[0].text` 里 ——
 - editor_toolset.toolsets.scene.SceneTools: Level and scene operations.
 ```
 
-读法：按行取 `- <全限定名>: <描述>`。条目可能跨行（描述里有换行），
-稳妥做法是匹配 `/^- ([^:\n]+): /` 拿全限定名，或只取 `list_toolsets` 结果里你要找的那几个名字。
-空工程 + `AllToolsets` 下实测有 **67 个** toolset。
+读法：按行取 `- <全限定名>: <描述>`。**这里有个真机踩过的坑**：
+toolset 的「描述」本身是多行 Markdown，里面**还有以 `- ` 开头的子条目**
+（例如 `NiagaraToolset_Assets` 的描述里就有 `- GetAssetDiscoveryInfo: ...`，那是工具名不是 toolset）。
+所以朴素正则 `/^- \S+: /` 会把它们误算成 toolset —— 实测会把 52 个算成 **55 个**，换台机会算成 **67 个**。
+
+**稳妥的解析正则**：要求名字里**必须含 `.`**（全限定名一定是 `Module.Path.Name`）：
+
+```js
+const toolsets = [...md.matchAll(/^- ([A-Za-z_][A-Za-z0-9_.]*\.[A-Za-z0-9_]+): /gm)].map(m => m[1]);
+```
+
+本机（UE 5.8 + `AllToolsets` + `UE5McpTest`）实测 **52 个 toolset / 830 个工具**；
+数量随工程启用的插件变化，不要写死。
 
 **`describe_toolset` 是标准 JSON**，`tools[]` 里每个元素有 `name` / `description` / `inputSchema`，
 `inputSchema.required` 是**字面**语义（见下面的坑）。
@@ -167,6 +177,24 @@ DSH 的 MCP 桥在收到 MCP `isError: true` 时**直接让工具调用失败**�
 | 类路径/枚举要加引号 | `(/Script/Engine.Actor)` | `"/Script/Engine.Actor"`（否则报 Undefined variable） |
 | 同一个调用别写两遍 | 两处都写 `(Transformation\|GetActorLocation)` 会建**两个节点**、执行两次 | 先 `(bind loc ...)` 再复用 `loc` |
 
+**布尔变量在 DSL 里的节点名会剥掉 `b` 前缀**（真机实测）：
+
+变量名 `bEnabled` → setter 节点是 `Variables|Default|SetEnabled`，**不是** `SetbEnabled`。
+getter 同理（`GetEnabled`）。先按「去掉名字开头的 b」拼，报错再试原样。
+稳妥做法：`BlueprintTools.list_variables` 拿真实变量名，再拼 Set/Get。
+
+**DSL 的已知边界（真机实测，别依赖）**：
+
+| 写法 | 实际行为 |
+|---|---|
+| `(switch ...)` | 写入返回成功但**不生成节点**（回读验证会发现缺失） |
+| `(bind x (...))` 作为 event 里第一条 | 可能把**整个图清空**；把 bind 放在别的语句之后 |
+| 图里已有残失败节点 | 后续 write **不会**清理，会一直留在图里 |
+| `(fn Name (params) ...)` 写函数体 | ✅ 可用，且编译通过 |
+
+→ **结论：每次 `write_graph_dsl` 之后必须 `read_graph_dsl` 回读核对**，
+只报"成功"不算数。发现节点缺失就重建蓝图（新蓝图 + 重写），不要往脏图上追加。
+
 **找节点类型别靠猜**：`find_node_types(graph, type_id_filter="Math|Trig", context_pins=[])`
 返回真实 type_id。注意 `find_node_types` 必须带 `graph` 和 `context_pins`（可为空数组）。
 
@@ -185,6 +213,52 @@ DSH 的 MCP 桥在收到 MCP `isError: true` 时**直接让工具调用失败**�
 **注意 PIE 里 actor 的 refPath 会变成 `/Memory/UEDPIE_0_...` 前缀**，不是 `/Temp/...`。
 查 PIE 里的 actor 要用 `find_actors` 重新找，别拿编辑器世界的旧 refPath。
 
+### 各 toolset 的参数名风格**不统一**（真机实测）
+
+这是最容易反复踩的坑。同一类操作，不同 toolset 的参数名不一样：
+
+| toolset | 风格 | 实例 |
+|---|---|---|
+| SceneTools / ObjectTools / ActorTools / MaterialTools | snake_case | `toolset_name`、`actor_type`、`refPath`、`material_or_function` |
+| **UMGToolSet** | **camelCase** | `folderPath`、`assetName`、`parentClass`、`widgetBlueprint`、`widgetClass` |
+| **SequencerTools** | snake_case 但**命名独特** | 建序列是 `package_path` + **`asset_name`**（没有 `name`/`folder_name`）；`actor_class_path`、`track_type` |
+| MaterialInstanceTools | snake_case | `instance`、`name`、`value` |
+
+**别猜参数名**：`describe_toolset` 会给出 `inputSchema.required` 和 `properties`，
+报错文本里也会附带完整 schema。**先看 schema 再调**，比试错快得多。
+
+另外注意：**工具名也可能和你想的不同**。例如材质的创建工具是 `create_material` 而不是 `create`，
+Blueprint 的创建工具才是 `create`。用 `describe_toolset` 列全量工具名确认。
+
+### 用 Python 编排多个工具（ProgrammaticToolset）
+
+`ProgrammaticToolset.execute_tool_script` 提供一个**受限 Python 沙箱**，
+可以在一个调用里串联多个工具、做条件判断和统计。
+
+```python
+def run():
+    level = execute_tool("editor_toolset.toolsets.scene.SceneTools.get_current_level", "{}")["returnValue"]
+    data = execute_tool("editor_toolset.toolsets.scene.SceneTools.find_actors",
+                        "{\"name\":\"\",\"tag\":\"\",\"collision_channels\":[]}")
+    actors = data["returnValue"]
+    lights = [a for a in actors if "Light" in a["refPath"]]
+    return {"level": level, "actor_count": len(actors), "light_count": len(lights)}
+```
+
+**沙箱的真实规则（真机实测）**：
+
+| 规则 | 事实 |
+|---|---|
+| 入口函数 | 必须是 `def run():`，顶层 `return` 会报 `'return' outside function` |
+| 工具名 | 第一个参数必须是**全限定名**（`editor_toolset.toolsets.scene.SceneTools.get_current_level`）。传短名 `SceneTools.get_current_level` 会报 `ToolsetIsNotRegistered: SceneTools is not registered` |
+| 入参 | `execute_tool(tool_name, json_input)` 的第二个参数是 **JSON 字符串**，传 dict 会 TypeError |
+| 返回 | 直接返回 dict；`execute_tool` 返回的是已解析的 `_StrictDict`，**不要**再 `json.loads` |
+| 白名单模块 | 只有 6 个：`math`、`re`、`json`、`time`、`datetime`、`copy` |
+| `import unreal` | ❌ 被拒：`Import of 'unreal' is not permitted` |
+| `open()` | 只读 |
+
+适合用来做：批量统计、条件筛选、多步只读查询的合并。**不适合**做复杂逻辑——沙箱就是干这个的。
+
 ### 慢是正常的
 
 `call_tool` 阻塞到 game thread 执行完毕才返回。重编译、资产导入/保存、批量操作可能几十秒到几分钟。
@@ -196,12 +270,18 @@ DSH 的 MCP 桥在收到 MCP `isError: true` 时**直接让工具调用失败**�
 | 报错文本（截断） | 原因 | 修法 |
 |---|---|---|
 | `Unknown tool <全限定名>` | 你把**全限定名**传给了 `tool_name` | 去掉 `<toolset_name>.` 前缀，用短名 |
-| `input param "X" needs a default value` | 该参数是 **`TOptional`**，被省略了 | **显式传 `null`**（如 `{"captureTransform": null, "annotations": null, "bShowUI": false}`） |
+| `input param "X" needs a default value` | 该参数是**没有默认值的 `TOptional`**，被省略了 | **显式传 `null`**。关键：`schema` 里所有没有 `default` 的可选结构体参数**都必须出现**，漏一个就报错（`CaptureViewport` 要同时给 `captureTransform: null, annotations: null`） |
 | `input params are required by the function input schema ..., but incoming ... is empty` | 缺的是**必填**参数（不是 TOptional） | 用 `describe_toolset` 读 `inputSchema.required`，按名字补上。报错文本里会附带完整 schema |
 | `no valid session ID provided` | **编辑器重启过**，DSH 仍持有旧 MCP session（已知限制） | **停止重试**，告诉用户：Web 侧边栏 Plugins → `Unreal Engine MCP` → 关掉再打开。详见 `references/operations.md` §D |
 | `GetObjectProperties on '...' (...) : the following properties could not be read: X, Y` | 属性名猜错（**纯文本，不是 JSON**） | 先 `list_properties` 拿真实属性名；见上面「属性名不能猜」 |
 | `Parameter error: ... is not valid Object for property 'instance'` | 组件 refPath 写错（如把 SkyLight 的组件写成 `LightComponent0`） | 先读 actor 的 `lightComponent` 属性拿正确 refPath |
 | `Unexpected token 'G'` / `Unexpected token 'P'` | 对**纯文本报错**做了 `JSON.parse` | 说明上一步调用其实失败了；先看原始 text 再决定 |
+| `Unknown tool <名字>` | 工具名记错了（如 `create` vs `create_material`） | `describe_toolset` 列全量工具名 |
+| `Parameter "X" is not a <类型> parameter on the material` | 材质参数还没定义 | 先用 `MaterialTools` 加参数，再设值 |
+| `is not valid Enum for property 'Enum'` | 枚举路径写错 | 用 `NiagaraToolset_Info.UEnum_Info` 查真实枚举路径 |
+| `'return' outside function` | Python 脚本没写 `run()` | 改成 `def run(): ...` |
+| `the JSON object must be str, bytes or bytearray, not dict` | `execute_tool` 入参传了 dict | 第二个参数传 **JSON 字符串** |
+| `Import of 'unreal' is not permitted` | 沙箱禁了 `unreal` 模块 | 只用白名单 6 个模块；要碰引擎就走普通工具 |
 | `The node could not be created / AddEvent\|X does not exist` | DSL 里的事件名不对 | BeginPlay 用 `EventBeginPlay`，Tick 用 `EventTick`；查 `BlueprintTools.list_events` |
 | `Could not connect pin ReturnValue to self` | 节点调用的第一个位置参数被当成了 self | 显式写 `:self self`，再用 `:PinName` 传参数 |
 | `Unknown variable "X"` | 类路径/枚举没加引号 | 加双引号：`"/Script/Engine.Actor"`、`"AlwaysSpawn"` |
@@ -209,6 +289,13 @@ DSH 的 MCP 桥在收到 MCP `isError: true` 时**直接让工具调用失败**�
 | `set_properties` 报解析错误 | `values` 要的是 **JSON 字符串**不是对象 | `{"values": "{\"intensity\": 10.0}"}` |
 | 对象引用报错 | 引用的形状不对 | 一律 `{"refPath": "<soft object path>"}`；spawn/find 的返回里带 refPath，抓住复用 |
 | `list_toolsets` 调用失败（其他报错） | 编辑器没开 / server 没起 / 端口不对 | 见 `references/operations.md` §A |
+| `Log category 'LogsToolset' not found` | `LogsToolset` 的 `category` 默认值是坏的（默认 `"LogsToolset"` 不是真 category） | **显式传 `category`**：`GetVerbosity`/`GetLogEntries` 要给 `{"category":"LogTemp"}`，否则一定失败 |
+| `Timed out waiting for asset selection`（约 5.6s） | `SelectAssets` 传了**包路径** `/Game/A/B` | 传**对象路径** `/Game/A/B.B`。另外 `GetSelectedAssets` 不会回读这个选择（两边不对称），别拿它做断言 |
+| `Unable to convert position into screen space` | `WorldPosToScreenCoords` 的点在相机背后/不在视锥内 | 先 `GetCameraTransform` 算清朝向再取点；俯视时把相机抬高、pitch 设 -90 |
+| `Unable to find a solid surface at the given screen coordinates` | `ScreenCoordsToWorld` 的屏幕射线没打到任何表面 | 让相机朝向有几何体的方向，或把 `traceDistance` 调够大 |
+| `Asset type does not support image capture` | `CaptureAssetImage` 只能截**支持缩略图**的资产类型（材质实例 ✅；Blueprint / LevelSequence / WidgetBlueprint ❌） | 换支持的资产类型；要看关卡就 `CaptureViewport` |
+| `ToolsetIsNotRegistered: <X> is not registered` | `execute_tool` 传了短 toolset 名 | 传全限定名，见「用 Python 编排多个工具」 |
+| 端口在 LISTEN 但每个请求被 reset / 无限挂住，编辑器窗口是开着的 | **崩溃后重启**弹了「Restore Packages」模态框，阻塞 game thread（不是 MCP 坏了！） | 点掉模态框，或按 `references/operations.md`「崩溃之后」清 `Saved/Autosaves` 后重启 |
 
 **两种「缺参数」要分清**：`needs a default value` = 该参数是 `TOptional`，传 `null` 即可；
 `are required by the function input schema` = 真的必填，必须给值。

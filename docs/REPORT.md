@@ -1,7 +1,7 @@
 # 交付报告：DSH × Unreal Engine MCP
 
 日期：2026-10-20
-交付形态：可安装的 DeepSeek Harness bundle（`dsh-unreal-mcp` v1.0.0）+ 无 UE 依赖的验证工程
+交付形态：可安装的 DeepSeek Harness bundle（`dsh-plugin-unreal-mcp` v1.0.0）+ 无 UE 依赖的验证工程
 参考物：Epic 官方 `unreal-engine-skills-for-claude-code`（MIT，UE 5.8 官方市场插件）
 
 ---
@@ -18,7 +18,7 @@
 
 > **验证状态更新（2026-10-20 晚）**：本机已安装 **Unreal Engine 5.8** 并完成真机验证，
 > 结论从「基于 mock + 第三方报告」升级为「真机实测」。真机与第三方报告有 3 处差异，
-> 已在 §2.4 单列。§2.1 的 mock 结论保留（它证明的是 DSH 客户端的线路兼容性）。
+> 已在 §2.6 单列。§2.1 的 mock 结论保留（它证明的是 DSH 客户端的线路兼容性）。
 
 ### 2.1 DSH 不需要 Epic 的 `unreal_mcp_proxy` —— 这是整个方案能成立的原因
 
@@ -76,6 +76,45 @@ mcp__unreal__call_tool
 
 ### 2.3 真机会话验证（DSH 重启后，2026-10-20 下午）
 
+对**所有主要 toolset** 做了逐项功能调用，结论如下。
+
+**完整跑通（创建/读取/修改/删除闭环）**：
+
+| toolset | 实测内容 |
+|---|---|
+| SceneTools | 创建/删除 actor、`find_actors`、`get_current_level`、`remove_from_scene` |
+| ObjectTools | `list_properties` / `get_properties` / `set_properties`（双层 JSON 已验证） |
+| ActorTools | `get_actor_transform` / `set_actor_transform`（位置+旋转+缩放全部生效）、`set_label` / `get_label`、`get_components`、`look_at` |
+| EditorAppToolset | `StartPIE` / `StopPIE`、`CaptureViewport`、`OpenEditorForAsset` |
+| LogsToolset | `GetLogEntries` 按 category + pattern 过滤，读到蓝图 PrintString 输出 |
+| BlueprintTools | 创建蓝图、`add_variable`（4 种类型）、`add_function_graph` + `add_function_param`、`write_graph_dsl`、`compile_blueprint`（`warnings_as_errors=true`）、`read_graph_dsl` 回读 |
+| MaterialTools | `create_material`、`add_expression`、`get_expressions`、`recompile`、`list_expression_classes` |
+| MaterialInstanceTools | `create`、`set_scalar_parameter`、`get_scalar_parameter`、`list_parameters` |
+| UMGToolSet | `CreateWidgetBlueprint`、`AddWidget`、`GetWidgets`（widgetCount）、`GetWidgetTreeDepth`、`CompileWidgetBlueprint` |
+| SequencerTools | `create_level_sequence`、`get/set_playback_range`、`add_root_folder` / `get_root_folders`、`add_track_to_sequence` / `get_tracks_on_sequence` |
+| ProgrammaticToolset | `execute_tool_script` 编排多工具；`get_execution_environment`；沙箱边界验证 |
+| AssetTools | `save_assets` 把蓝图落盘到 `.uasset` |
+
+**本轮新发现的行为（已写进 skill）**：
+
+1. **各 toolset 参数名风格不统一**——UMGToolSet 用 camelCase（`folderPath` / `assetName` / `parentClass`），
+   其它 toolset 用 snake_case；SequencerTools 还有独特命名（`package_path` / `actor_class_path` / `track_type`）。
+2. **工具名会和直觉不同**——材质创建是 `create_material`，Blueprint 创建才是 `create`。
+3. **DSL 的布尔变量 setter 会剥掉 `b` 前缀**——变量 `bEnabled` 对应节点 `SetEnabled`。
+4. **DSL 的 `(switch ...)` 不生成节点**（写入返回成功但回读缺失）；
+   `(bind ...)` 作为 event 首条可能清空整个图。→ 每次 write 后必须回读核对。
+5. **Python 沙箱规则**：入口必须是 `def run():`；`execute_tool` 第二参是 JSON 字符串；
+   返回已是解析后的 dict（不要再 `json.loads`）；白名单仅 6 个模块（`math`/`re`/`json`/`time`/`datetime`/`copy`），
+   `import unreal` 被明确拒绝。
+
+**仅枚举工具面、未做完整功能调用**：Niagara（46 个工具）、
+StateTree、ControlRig、PCG、Dataflow、GameplayAbility、GameplayTags、StringTable、Texture、
+DataRegistry、SemanticSearch、Plugin/GameFeatures、ConfigSettings、Conversation、
+AutomationTest、AnimationAssistant、SkeletalMesh、StaticMesh、WidgetToolSet 等。
+这些工具面通过 `describe_toolset` 与 `list_toolsets` 确认存在。
+
+### 2.4 全功能验证（2026-10-20 晚，UE 5.8 真机）
+
 重启 DSH 后在新会话里直接验证插件自动加载，并用 MCP 工具完成了一次真实分析任务：
 
 | 验证 | 结果 |
@@ -106,7 +145,7 @@ mcp__unreal__call_tool
 **toolset 数量随工程变化**：同一台机器上实测过 **67 个**（UE5McpTest 首次）和 **55 个**
 （重启后加载的工程/插件组合不同）。文档已改为「数十个，随工程变化」，不再写死数字。
 
-### 2.4 两个影响 skill 文案的 DSH 侧行为（实测，已写进 skill）
+### 2.5 两个影响 skill 文案的 DSH 侧行为（实测，已写进 skill）
 
 | 事实 | 证据 | 对 skill 的影响 |
 |---|---|---|
@@ -115,7 +154,7 @@ mcp__unreal__call_tool
 
 两条由 Lead 与 verifier **各自独立复现，结论一致**。
 
-### 2.5 真机 vs 第三方报告的差异（**真机实测纠正**）
+### 2.6 真机 vs 第三方报告的差异（**真机实测纠正**）
 
 本机装上 UE 5.8 后逐条核对，发现流传的逆向报告有 3 处与真实引擎不符。
 **这些差异会直接导致 agent 写错代码**，已全部按真机修正 skill 文案。
@@ -247,7 +286,7 @@ find_actors → 1 个 actor，refPath=/Game/Maps/Main.Main:PersistentLevel.Point
 ## 5. 未验证 / 边界（如实声明）
 
 > **更新**：真机验证已于 2026-10-20 完成（UE 5.8 + `UE5McpTest` 工程），
-> 见 §2.1 与 §2.4。下表只保留**仍未**验证的项。
+> 见 §2.1、§2.3 与 §2.4。下表只保留**仍未**验证的项。
 
 | 项 | 状态 | 原因 |
 |---|---|---|
