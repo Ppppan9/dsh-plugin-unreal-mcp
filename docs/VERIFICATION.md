@@ -419,8 +419,8 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 
 | 工具 | 复验后的真实原因 | 属于什么性质 |
 |---|---|---|
-| `SemanticSearchToolset.Search` | `Embedding generation failed: HTTP 401 … You didn't provide an API key` | **需要外部 embedding 服务与 API key**（本机未配置） |
-| `SemanticSearchToolset.FindSimilar` | `The SemanticSearch index is empty — nothing to compare against.` | 同上：索引为空（没建索引 / 没 API key） |
+| `SemanticSearchToolset.Search` | `Embedding generation failed: HTTP 401 … You didn't provide an API key` | **需要外部 embedding 服务与 API key**（本机未配置）。已定位到引擎侧根因与配置位置，见 §6.9 |
+| `SemanticSearchToolset.FindSimilar` | `The SemanticSearch index is empty — nothing to compare against.` | 同上：索引为空也是因为没建索引，而建索引同样要 embedding 服务（见 §6.9） |
 | `GameFeaturesToolset.IsGameFeatureActive` | `GFP not found: Niagara` | 本工程**没有启用任何 Game Feature Plugin**（`ListDiscoveredGameFeaturePlugins` 返回 `[]`） |
 | `GameFeaturesToolset.GetGameFeatureState` | `GFP not found: AbilitySystemGameFeatureActions` | 同上 |
 | `NiagaraToolset_System.ApplyStackIssueFix` | `No stack issue with IssueId '…' was found. Use GetStackIssues to obtain current IssueIds.` | 该 issue 的 `fixes` 数组为**空**（`GetStackIssues` 返回 `fixes: []`），没有可应用的修复项 |
@@ -431,6 +431,55 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 
 **结论**：830 个工具里**没有一个是坏的**。9 个 BLOCKED 全部是「本机/本工程缺前置条件」或「UE 5.8 引擎侧限制」，
 且每条都给出了可复现的原文错误。插件这一侧（DSH 集成、线路、参数契约、错误语义、重连）**零缺陷**。
+
+### 6.9 SemanticSearch 的 API key 依赖：已定位到确切位置与获取方式
+
+这是 9 个 BLOCKED 里唯一一个「用户可以自己解决」的，所以单独查清楚了源码：
+
+**根因**（`Engine/Plugins/Experimental/SemanticSearch/Source/SemanticSearch/Private/EmbeddingProviders/OpenAIEmbeddingProvider.cpp`）：
+UE 5.8 的 SemanticSearch 用 **OpenAI 兼容协议**，工作流是
+「资产缩略图 → `/chat/completions` 生成 tag+caption → caption 发 `/embeddings` 生成向量 → 存本地向量索引做混合检索」。
+没有 embedding 服务，索引建不起来，**查询**也做不了（每次查询都要把 query 变成向量）。
+
+**配置位置**：`USemanticSearchSettings`（`config = EditorPerProjectUserSettings`）
+→ Project Settings → Plugins → Semantic Search → ini 段 `[/Script/SemanticSearch.SemanticSearchSettings]`。
+
+| 设置 | 默认值 |
+|---|---|
+| `CaptioningBaseUrl` / `CaptioningApiKey` / `CaptioningModel` | `https://api.openai.com/v1` / *(空)* / `gpt-5.4-mini` |
+| `EmbeddingBaseUrl` / `EmbeddingApiKey` / `EmbeddingModel` | `https://api.openai.com/v1` / *(空)* / `text-embedding-3-small` |
+| `EmbeddingDimension` | `512`（改了会重建整个索引） |
+
+**获取 key 的三条路**：
+
+1. **OpenAI 官方** —— <https://platform.openai.com/api-keys>（需绑卡）；
+   embedding 用 `text-embedding-3-small`，caption 必须用**能看图**的模型。
+2. **本机 / 自建 OpenAI 兼容服务（免费、可离线）** —— 把 `EmbeddingBaseUrl` 指向
+   `http://127.0.0.1:11434/v1`（Ollama）或任意 LiteLLM 兼容端点，
+   key 填**任意非空字符串**即可：插件只把它塞进 `Authorization: Bearer` 头，不做校验。
+3. **只用已有索引** —— 索引文件在 `<Project>/Saved/SemanticSearch/SearchIndex.bin`，
+   `bAutoIndexCachedOnStartup=True` 可只读 DDC 缓存；但**查询仍需 embedding 服务**。
+
+**已验证可以通过 MCP 配置**（无需手点 UI）：
+
+```js
+ConfigSettingsToolset.SetSectionProperties({
+  containerName: 'Editor', categoryName: 'Plugins', sectionName: 'Semantic Search',
+  propertiesJson: JSON.stringify({ EmbeddingApiKey: 'sk-xxx', CaptioningApiKey: 'sk-xxx' }),
+})
+```
+
+实测：写入后 `Search` 的报错从「You didn't provide an API key」变成
+「Incorrect API key provided: sk-REA-P\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*\*-KEY」——
+**证明 key 确实被消费了**；改回空值后报错复原。设置改动会触发引擎重新注册 embedding provider
+（`Re-registered embedding provider after settings change (config field edited)`），**无需重启编辑器**。
+
+> ⚠️ **安全提示（已实测）**：`ConfigSettingsToolset.SaveSection` 会把值写进工程的
+> **`Config/DefaultEditorPerProjectUserSettings.ini`**（源控文件），**API key 会明文进版本库**。
+> `SetSectionProperties` 只改内存（重启失效），`SaveSection` 才落盘。
+> 验证过程中用占位 key 测过这条路径，事后已把该 ini 恢复原状。
+> 另外插件日志会打印 `LogSemanticSearch: OpenAIEmbeddingProvider created (..., EMBED API KEY MISSING)`，
+> 配好 key 后这行仍会打印 model 与 base URL。
 
 ## 6.8 验证结束时的环境清理确认
 

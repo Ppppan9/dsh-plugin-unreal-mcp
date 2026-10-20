@@ -321,7 +321,7 @@ def run():
 | 编辑器闪退，栈里有 `FWidgetBlueprintOperationUtils::WrapWidgets` | `UMGToolSet.WrapWidgets` 在批量操作控件时踩空指针 | 不要用 `WrapWidgets`；`ReplaceWidgetWith*` 的 `widgetToReplace` 为空也会失败 |
 | `No stack issue with IssueId '…' was found` | Niagara 的 issue `fixes` 数组是空的 | 先 `GetStackIssues` 看 `fixes` 有没有内容 |
 | `GFP not found: <name>` | 本工程没启用任何 Game Feature Plugin | `ListDiscoveredGameFeaturePlugins` 返回空就是这个原因 |
-| `Embedding generation failed: HTTP 401 … You didn't provide an API key` | SemanticSearch 需要外部 embedding 服务与 API key | 本机没配就不可用；不是工具坏了 |
+| `Embedding generation failed: HTTP 401 … You didn't provide an API key` | SemanticSearch 需要外部 embedding 服务与 API key | 在 Project Settings → Plugins → Semantic Search 填 `EmbeddingApiKey` / `CaptioningApiKey`；或把 BaseUrl 指向本机 Ollama（key 随便填）。详见 `references/operations.md`「怎么给 SemanticSearch 配 API key」 |
 | `The SemanticSearch index is empty` | 同上，索引没建 | 同上 |
 | `does not implement INamedSlotInterface` | UMG 宿主控件必须实现该接口 | 换控件类型，或换个目标 |
 | `is not valid MovieSceneSequence` | Sequencer `binding.sequence` 要 `MovieSceneSequence` 对象 | LevelSequence 的内部序列无法用软路径表达，这条路径在本机走不通 |

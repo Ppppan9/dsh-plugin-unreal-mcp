@@ -187,6 +187,69 @@ open -a "<UE>/Engine/Binaries/Mac/UnrealEditor.app" --args "<abs>/<Project>.upro
 | 工具 | 原因 | 怎么确认 |
 |---|---|---|
 | `SemanticSearchToolset.Search` / `FindSimilar` | 需要外部 embedding 服务与 API key | 报 `Embedding generation failed: HTTP 401` / `The SemanticSearch index is empty` |
+
+### 怎么给 SemanticSearch 配 API key（`Search` / `FindSimilar` 唯一的依赖）
+
+UE 5.8 的 `SemanticSearch` 插件用 **OpenAI 兼容协议**：拿资产缩略图去 `/chat/completions` 生成
+tag + caption，再把 caption 发到 `/embeddings` 生成向量，最后存进本地向量索引做混合检索。
+**没有 embedding 服务，这 2 个工具就完全不可用**（跟本插件无关，是引擎侧设计）。
+
+配置在 **Project Settings → Plugins → Semantic Search**（对应 ini 段
+`[/Script/SemanticSearch.SemanticSearchSettings]`）：
+
+| 设置 | 默认值 | 说明 |
+|---|---|---|
+| `CaptioningBaseUrl` | `https://api.openai.com/v1` | 视觉模型端点，插件自动补 `/chat/completions` |
+| `CaptioningApiKey` | *(空)* | 发 `Authorization: Bearer <key>` |
+| `CaptioningModel` | `gpt-5.4-mini` | 要**能看图**的模型 |
+| `EmbeddingBaseUrl` | `https://api.openai.com/v1` | 插件自动补 `/embeddings` |
+| `EmbeddingApiKey` | *(空)* | 发 `Authorization: Bearer <key>` |
+| `EmbeddingModel` | `text-embedding-3-small` | |
+| `EmbeddingDimension` | `512` | 改了会让整个索引重建 |
+
+**三种拿 key 的方式**：
+
+1. **OpenAI 官方**：<https://platform.openai.com/api-keys> 建 key（需要绑卡），
+   embedding 用 `text-embedding-3-small`，caption 要用支持视觉的模型。
+2. **本机 / 自建 OpenAI 兼容服务（免费、可离线）**：把 `EmbeddingBaseUrl` 指向
+   `http://127.0.0.1:11434/v1`（Ollama）或任何 LiteLLM 兼容端点，key 随便填非空字符串即可
+   —— 插件只把它放进 `Authorization` 头，不校验。
+3. **只做检索不重建索引**：若索引已存在（`Saved/SemanticSearch/SearchIndex.bin`），
+   `bAutoIndexCachedOnStartup=True` 可以只读 DDC 缓存；但**查询本身仍要 embedding 服务**，
+   因为 `Search` 每次都要把 query 变成向量。
+
+**通过 MCP 配置（不用手点 UI）**：
+
+```js
+// ConfigSettingsToolset 能读写这个 section
+await callTool('call_tool', {
+  toolset_name: 'ConfigSettingsToolset.ConfigSettingsToolset',
+  tool_name: 'SetSectionProperties',
+  arguments: {
+    containerName: 'Editor', categoryName: 'Plugins', sectionName: 'Semantic Search',
+    propertiesJson: JSON.stringify({ EmbeddingApiKey: 'sk-xxx', CaptioningApiKey: 'sk-xxx' }),
+  },
+});
+await callTool('call_tool', {
+  toolset_name: 'ConfigSettingsToolset.ConfigSettingsToolset',
+  tool_name: 'SaveSection',
+  arguments: { containerName: 'Editor', categoryName: 'Plugins', sectionName: 'Semantic Search' },
+});
+```
+
+> ⚠️ **`SaveSection` 会写进工程的 `Config/DefaultEditorPerProjectUserSettings.ini`**（源控文件），
+> key 会明文进版本库。**只在本地用 `SetSectionProperties`（不 Save）**，
+> 或者用完立刻把 key 清空再 Save。实测确认：`SetSectionProperties` 只改内存（重启即失效），
+> `SaveSection` 才落盘到工程 ini。
+>
+> 另外 key 是 `PasswordField`，但**插件的日志会把它打出来**：
+> `LogSemanticSearch: OpenAIEmbeddingProvider created (..., EMBED API KEY MISSING)` —— 配好之后
+> 这行日志变成没有 `KEY MISSING` 后缀，但仍会打 model/base url。
+
+**建索引**：在 UE 控制台执行 `SemanticSearch.IndexAll`（会把 `IndexedPaths` 下的资产送去生成
+caption + embedding）；`SemanticSearch.IndexStats` 看索引状态。
+`IndexedPaths` 默认是 `/`（整个工程）。控制台命令**没有**对应的 MCP 工具，
+需要用 UE 自带的 `ExecuteConsoleCommand`（Python）或者手工在 UE 控制台里敲。
 | `GameFeaturesToolset.IsGameFeatureActive` / `GetGameFeatureState` | 本工程没启用任何 Game Feature Plugin | `ListDiscoveredGameFeaturePlugins` 返回 `[]`，报 `GFP not found: <name>` |
 | `NiagaraToolset_System.ApplyStackIssueFix` | 该 issue 的 `fixes` 数组为空，没有可应用的修复项 | `GetStackIssues` 看 `fixes` 是否为 `[]` |
 | `UMGToolSet.SetNamedSlotContent` | 宿主控件必须实现 `INamedSlotInterface` | 报 `HostWidget 'X' does not implement INamedSlotInterface.` |
