@@ -432,6 +432,22 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 **结论**：830 个工具里**没有一个是坏的**。9 个 BLOCKED 全部是「本机/本工程缺前置条件」或「UE 5.8 引擎侧限制」，
 且每条都给出了可复现的原文错误。插件这一侧（DSH 集成、线路、参数契约、错误语义、重连）**零缺陷**。
 
+## 6.8 验证结束时的环境清理确认
+
+验证过程中在工程里创建了大量临时资产（`/Game/MCPV_*`）与临时 actor。**全部已清理**：
+
+| 项 | 清理结果 |
+|---|---|
+| `/Game/MCPV_ASSET`（19 个资产） | ✅ 已 `AssetTools.delete` 逐个删除并 `save_assets`，磁盘目录已移除 |
+| `/Game/MCPV_SYS`（4 个：PCG 图 / Niagara System / 2 个 BP） | ✅ 已删除，目录已移除 |
+| `/Game/MCPV_ANIM`（LevelSequence） | ✅ 已删除，目录已移除 |
+| `/Game/MCPV_LEAD*`（我自己的复验资产） | ✅ 已删除，目录已移除 |
+| 临时 actor | ✅ 0 个残留（关卡 actor 数回到基线 145） |
+| 工程剩余资产 | `/Game/Blueprints/BP_SmokeTest`、`BP_LightController`、`/Game/McpTest/BP_McpToolLib2`、`BP_DslToolLib` —— 全部是**本次验证之前就存在**的 |
+
+> 清理本身也是一次验证：`AssetTools.delete` 对 32 个资产全部返回 `true`，
+> `SceneTools.delete_folder` 在目录已空时返回 `Folder does not exist`（幂等、不会误删）。
+
 ## 7. 仍未验证 / 边界声明
 
 如实列出，**不用推断冒充实测**：
