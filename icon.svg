@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  dsh-unreal-mcp bundle icon — 自绘，不派生自 Epic 的任何商标或 logo。
+  语义：左侧是编辑器（圆角 U 形 = 编辑器视口），右侧三个节点是 UE 的
+  list_toolsets / describe_toolset / call_tool 三工具派发链，中间一条连线表示
+  「发现 → 描述 → 派发」。24×24 网格，纯描边，在深浅两种主题下都可读。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Unreal Engine MCP">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1b2330"/>
+      <stop offset="100%" stop-color="#0d1117"/>
+    </linearGradient>
+    <linearGradient id="stroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7aa2ff"/>
+      <stop offset="100%" stop-color="#3ddc97"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="46" height="46" rx="11" fill="url(#bg)" stroke="#2b3648" stroke-width="1.5"/>
+
+  <!-- 编辑器：视口轮廓（自绘的 U 形，不是商标） -->
+  <path d="M12 13v11a7 7 0 0 0 14 0V13" fill="none" stroke="url(#stroke)" stroke-width="3.2" stroke-linecap="round"/>
+
+  <!-- 派发链：三个节点 + 连线 -->
+  <path d="M30 16h4M30 24h4M30 32h4" stroke="#3ddc97" stroke-width="2" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="37" cy="16" r="2.6" fill="#3ddc97"/>
+  <circle cx="37" cy="24" r="2.6" fill="#7aa2ff"/>
+  <circle cx="37" cy="32" r="2.6" fill="#3ddc97"/>
+
+  <!-- 底部端口标记：loopback 连接 -->
+  <circle cx="19" cy="38" r="2.2" fill="#7aa2ff" opacity="0.9"/>
+  <path d="M21.2 38h5.6" stroke="#7aa2ff" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+</svg>

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Unreal Engine MCP",
+    "description": "Drive a live Unreal Editor from DeepSeek Harness through Unreal's ModelContextProtocol server, and ship the three skills that teach the discover → describe → dispatch contract."
+  }
+}

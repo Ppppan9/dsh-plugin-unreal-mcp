@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Unreal Engine MCP",
+    "description": "让 DSH 里的 Agent 直连运行中的 Unreal Editor（UE 5.8 的 ModelContextProtocol server），并附带三个 skill 教它「发现 → 描述 → 派发」的三工具契约。"
+  }
+}

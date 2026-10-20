@@ -1,0 +1,44 @@
+# dsh-unreal-mcp bundle patch —— 往 profile 的 entry list 顶部追加两行。
+#
+# 两行各管一件事，互不依赖：
+#   1. unreal-mcp-client：官方的 @deepseek-ai/dsh-mcp-client，直连 Unreal 编辑器进程内的
+#      ModelContextProtocol HTTP/SSE server。**不写任何代理 / 桥接程序**：
+#      dsh-mcp-client 底层是官方 @modelcontextprotocol/client 的 StreamableHTTPClientTransport，
+#      它已经正确处理 UE 的 session 头、tools/call 返回 text/event-stream、以及不提供 GET SSE 流
+#      这些线路怪癖（实测 initialize → tools/list → tools/call 全通）。
+#      （Epic 那个 unreal_mcp_proxy 是给只认 stdio 的宿主用的；DSH 不需要。）
+#   2. unreal-mcp：本 bundle 自己的 Host 插件，注册 3 个 bundled skill，
+#      并按 session cwd 探测 UE 工程往 system prompt 追加一句上下文。
+#
+# 注意：这里的 `name` 字段由 loader 解析，走 DSH 的双锚点解析，因此
+# `@deepseek-ai/dsh-mcp-client` 能正常加载；但插件文件内部的 ESM import 不享受
+# 这套解析（profile 的 node_modules 里没有 DSH 安装目录），所以 index.js 零第三方 import。
+#
+# 端口：默认 8000（UE 的默认值）。若编辑器用 `ModelContextProtocol.StartServer <port>`
+# 或 `-ModelContextProtocolPort=<port>` 换了端口，设置环境变量 UNREAL_MCP_PORT 即可。
+
+- insert:
+    - id: unreal-mcp-client
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: unreal
+        transport: streamable-http
+        # 允许用 UNREAL_MCP_PORT 覆盖；不设时回落 8000（UE 侧默认端口）。
+        url: !!js 'process.env.UNREAL_MCP_PORT ? "http://127.0.0.1:" + process.env.UNREAL_MCP_PORT + "/mcp" : "http://127.0.0.1:8000/mcp"'
+        # UE 的 tools/call 会阻塞到 game thread 执行完毕（重编译、资产导入可达几十秒到几分钟），
+        # 所以超时给足 5 分钟，避免把「慢」误判成「死」。
+        toolCallTimeoutMs: 300000
+        # 编辑器没开时不要拦启动。默认值也是 false，这里显式写出来表明是刻意选择。
+        failOnStartupError: false
+        reconnect:
+          enabled: true
+          # 编辑器重启 / 端口暂不可用是常态：首次延迟 1s，上限 30s 退避。
+          initialDelayMs: 1000
+          maxDelayMs: 30000
+          # 默认 10 次重试后就会注销工具并要求 reload；对「开着 DSH 再开编辑器」
+          # 这个日常节奏来说太短，调到 100000（≈ 30s 退避下约 34 天，视作无限重试）。
+          maxAttempts: 100000
+
+    - id: unreal-mcp
+      name: 'dsh-unreal-mcp'
+      config: {}
