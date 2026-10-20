@@ -207,16 +207,47 @@ tag + caption，再把 caption 发到 `/embeddings` 生成向量，最后存进�
 | `EmbeddingModel` | `text-embedding-3-small` | |
 | `EmbeddingDimension` | `512` | 改了会让整个索引重建 |
 
-**三种拿 key 的方式**：
+### 到底要什么「API」？—— 需要**两个**独立的服务，不是一个
 
-1. **OpenAI 官方**：<https://platform.openai.com/api-keys> 建 key（需要绑卡），
-   embedding 用 `text-embedding-3-small`，caption 要用支持视觉的模型。
-2. **本机 / 自建 OpenAI 兼容服务（免费、可离线）**：把 `EmbeddingBaseUrl` 指向
-   `http://127.0.0.1:11434/v1`（Ollama）或任何 LiteLLM 兼容端点，key 随便填非空字符串即可
-   —— 插件只把它放进 `Authorization` 头，不校验。
-3. **只做检索不重建索引**：若索引已存在（`Saved/SemanticSearch/SearchIndex.bin`），
-   `bAutoIndexCachedOnStartup=True` 可以只读 DDC 缓存；但**查询本身仍要 embedding 服务**，
-   因为 `Search` 每次都要把 query 变成向量。
+读源码（`OpenAIEmbeddingProvider.cpp`）后确认，UE 5.8 的 SemanticSearch 走**两条**独立的 HTTP 调用：
+
+| # | 端点 | 请求体 | 响应要求 | 谁能干 |
+|---|---|---|---|---|
+| ① **caption**（建索引时） | `POST {CaptioningBaseUrl}/chat/completions` | `{model, messages:[{role,content:[{type:text|image_url,…}]}], response_format:{type:"json_schema", json_schema:{name, strict:true, schema}}}` | `choices[0].message.content` 必须是**符合 schema 的 JSON 字符串** `{tags:[string], caption:string}`；`finish_reason` 必须是 `stop` | **必须支持视觉（能看图）** + **必须支持 `json_schema` 结构化输出** |
+| ② **embedding**（建索引 + 每次查询） | `POST {EmbeddingBaseUrl}/embeddings` | `{model, input, dimensions}` | `data[0].embedding` 是**数字数组** | 任何 OpenAI 兼容的 embedding 服务 |
+
+**为什么必须支持视觉**：6 个资产处理器（StaticMesh / SkeletalMesh / Material / MaterialInstance /
+Texture / Blueprint）**全部**继承 `ThumbnailBaseProcessor`，都会把资产缩略图（PNG，base64 data URL）
+塞进 chat/completions 的 `image_url` part。**没有缩略图 → 该资产直接 `PreProcessor` 失败跳过**，
+不会退化成纯文本。UE 自带的提示词也明确要求模型"描述可见内容"。
+
+**为什么 `EmbeddingDimension` 要对**：UE 把 `dimensions` 传给服务端，**并按返回向量长度懒初始化索引**
+（`EnsureInitialized(Embedding.Num())`）。服务端若忽略 `dimensions` 返回别的长度，
+第一次建索引就带着错维度，之后检索全废。**改这个值 = 整个索引重建**。
+
+**三条可行路径**：
+
+| 方案 | 需要你提供什么 | 成本 | 备注 |
+|---|---|---|---|
+| **A. OpenAI 官方** | 1 个 key（<https://platform.openai.com/api-keys>） | embedding 按 token 计费（`text-embedding-3-small` 很便宜）；caption 用 `gpt-5.4-mini` 这类**视觉**模型，按图计费 | caption 端点最耗 token：每个资产一次视觉调用 |
+| **B. 本机 Ollama（免费、离线、无限量）** | 不用给 key，**我可以直接装** | 磁盘：vision 模型 ~6.2 GB（`qwen3-vl:8b`）+ embedding 模型 ~0.6 GB（`qwen3-embedding:0.6b`） | key 填任意非空字符串即可（插件只塞进 `Authorization` 头，不校验）；**但要确认 Ollama 的 `response_format:{type:"json_schema"}` 被支持**，否则 caption 那条会失败 |
+| **C. 国产云服务（便宜、中文可用）** | 1 个 key | 按量 | 阿里百炼 `text-embedding-v3` / `qwen3-embedding` 有 OpenAI 兼容端点；caption 需要**视觉**模型且支持 `json_schema` |
+
+**只做检索不建索引**是不行的：`Search` **每次查询都要把 query 变成向量**，
+所以即使索引已存在（`Saved/SemanticSearch/SearchIndex.bin`），查询阶段照样要 embedding 服务。
+（`bAutoIndexCachedOnStartup=True` 只是让你不必重建索引。）
+
+#### 各方案要填的具体字段
+
+```
+CaptioningBaseUrl  = https://api.openai.com/v1        # 或 http://127.0.0.1:11434/v1
+CaptioningApiKey   = <你的 key>
+CaptioningModel    = gpt-5.4-mini                    # 必须是能看图 + 支持 json_schema 的
+EmbeddingBaseUrl   = https://api.openai.com/v1        # 或同上
+EmbeddingApiKey    = <你的 key>
+EmbeddingModel     = text-embedding-3-small
+EmbeddingDimension = 512                             # 必须 = 服务端实际返回的向量长度
+```
 
 **通过 MCP 配置（不用手点 UI）**：
 

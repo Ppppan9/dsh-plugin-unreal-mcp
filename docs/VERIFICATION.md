@@ -450,15 +450,31 @@ UE 5.8 的 SemanticSearch 用 **OpenAI 兼容协议**，工作流是
 | `EmbeddingBaseUrl` / `EmbeddingApiKey` / `EmbeddingModel` | `https://api.openai.com/v1` / *(空)* / `text-embedding-3-small` |
 | `EmbeddingDimension` | `512`（改了会重建整个索引） |
 
+**需要的是「两个」独立的 OpenAI 兼容服务，不是一个**（读 `OpenAIEmbeddingProvider.cpp` 确认）：
+
+| # | 端点 | 请求体 | 响应要求 | 谁能干 |
+|---|---|---|---|---|
+| ① caption | `POST {CaptioningBaseUrl}/chat/completions` | `{model, messages, response_format:{type:"json_schema", json_schema:{name, strict:true, schema}}}` | `choices[0].message.content` 必须是符合 schema 的 JSON 字符串 `{tags:[string],caption:string}` | **必须支持视觉 + `json_schema` 结构化输出** |
+| ② embedding | `POST {EmbeddingBaseUrl}/embeddings` | `{model, input, dimensions}` | `data[0].embedding` 数字数组 | 任何 OpenAI 兼容 embedding 服务 |
+
+**为什么必须支持视觉**：6 个资产处理器（StaticMesh / SkeletalMesh / Material / MaterialInstance /
+Texture / Blueprint）**全部**继承 `ThumbnailBaseProcessor`，都会把缩略图（PNG base64）塞进
+`image_url` part；**没有缩略图就直接 `PreProcessor` 失败跳过**，不会退化成纯文本。
+
+**为什么 `EmbeddingDimension` 要对**：UE 按**服务端实际返回的向量长度**懒初始化索引
+（`EnsureInitialized(Embedding.Num())`），服务端忽略 `dimensions` 会导致索引维度错、检索全废。
+改这个值 = 整个索引重建。
+
 **获取 key 的三条路**：
 
-1. **OpenAI 官方** —— <https://platform.openai.com/api-keys>（需绑卡）；
-   embedding 用 `text-embedding-3-small`，caption 必须用**能看图**的模型。
-2. **本机 / 自建 OpenAI 兼容服务（免费、可离线）** —— 把 `EmbeddingBaseUrl` 指向
-   `http://127.0.0.1:11434/v1`（Ollama）或任意 LiteLLM 兼容端点，
-   key 填**任意非空字符串**即可：插件只把它塞进 `Authorization: Bearer` 头，不做校验。
-3. **只用已有索引** —— 索引文件在 `<Project>/Saved/SemanticSearch/SearchIndex.bin`，
-   `bAutoIndexCachedOnStartup=True` 可只读 DDC 缓存；但**查询仍需 embedding 服务**。
+| 方案 | 需要你提供 | 成本 | 备注 |
+|---|---|---|---|
+| A. OpenAI 官方 | 1 个 key（<https://platform.openai.com/api-keys>） | embedding 按 token 计费；caption 用视觉模型按图计费（每个资产一次） | 默认值直接可用：`gpt-5.4-mini` + `text-embedding-3-small` + dim 512 |
+| B. 本机 Ollama | **不用给 key**，我可以直接装 | 磁盘 ~6.8 GB：`qwen3-vl:8b`（6.19 GB，视觉）+ `qwen3-embedding:0.6b`（0.64 GB） | key 填任意非空字符串（插件不校验）；**需确认 Ollama 支持 `response_format:{type:"json_schema"}`** |
+| C. 国产云服务 | 1 个 key | 按量 | 阿里百炼 `text-embedding-v3`/`qwen3-embedding` 有 OpenAI 兼容端点；caption 需视觉+json_schema 模型 |
+
+**「只用已有索引」不可行**：`Search` **每次查询都要把 query 变成向量**，查询阶段同样要 embedding 服务；
+`bAutoIndexCachedOnStartup=True` 只是免去重建索引。
 
 **已验证可以通过 MCP 配置**（无需手点 UI）：
 
