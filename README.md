@@ -3,6 +3,11 @@
 > 让 **DeepSeek Harness（DSH）** 直接驱动 **Unreal Editor 5.8+**。
 > 通过逆向分析 Epic 官方为 Claude Code 发布的 Unreal MCP 插件制作而成。
 
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![DSH](https://img.shields.io/badge/DeepSeek-Harness-4D6BFE.svg)](https://github.com/deepseek-ai/deepseek-harness)
+[![Unreal](https://img.shields.io/badge/Unreal-5.8%2B-0E1128.svg)](https://www.unrealengine.com/)
+[![REA](https://img.shields.io/badge/reverse--engineered%20with-REA-ff6b6b.svg)](https://www.npmjs.com/package/rea-agents)
+
 [English](#english) | 中文
 
 ---
@@ -22,8 +27,9 @@
 本项目**逆向自 Epic Games 官方为 Claude Code 发布的插件**
 `unreal-engine-skills-for-claude-code`（MIT，commit `a6aa73a`）。
 
-- **分析工具**：REA（reverse-engineer-anything）6.4.0
-- **分析对象**：Epic 官方 Claude Code 插件的完整源码树（995 行文本 + 84 行 bash hook）
+- **分析工具**：[REA](https://www.npmjs.com/package/rea-agents)（reverse-engineer-anything）6.4.0
+- **分析对象**：Epic 官方 Claude Code 插件的完整源码树（995 行文本 + 84 行 bash hook），
+  [github.com/EpicGames/unreal-engine-skills-for-claude-code-plugin](https://github.com/EpicGames/unreal-engine-skills-for-claude-code-plugin)
 - **完整逆向报告**：[`docs/REPORT.md`](docs/REPORT.md)
   —— 含引擎侧 MCP 协议细节、真机实测数据、与第三方报告的差异对照
 
@@ -222,8 +228,8 @@ cd tests
 A **DeepSeek Harness bundle** that lets DSH agents drive a live **Unreal Editor 5.8+**.
 
 **Reverse-engineered from** Epic Games' official Claude Code plugin
-`unreal-engine-skills-for-claude-code` (MIT, `a6aa73a`) using
-REA (reverse-engineer-anything) 6.4.0. Full reverse-engineering report:
+[`unreal-engine-skills-for-claude-code`](https://github.com/EpicGames/unreal-engine-skills-for-claude-code-plugin) (MIT, `a6aa73a`) using
+[REA](https://www.npmjs.com/package/rea-agents) 6.4.0. Full reverse-engineering report:
 [`docs/REPORT.md`](docs/REPORT.md).
 
 ## Install
