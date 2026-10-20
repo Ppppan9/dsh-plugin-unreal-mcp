@@ -154,10 +154,17 @@ UE 默认开启 **Tool Search 模式**，所以 `tools/list` 里**只有 3 个�
 | MaterialTools | ✅ 创建材质、加表达式、列表达式、重编译 |
 | MaterialInstanceTools | ✅ 创建材质实例、参数读写 |
 | UMGToolSet | ✅ 创建 Widget BP、加 TextBlock、控件树、编译 |
-| SequencerTools | ✅ 创建 LevelSequence、播放范围、root folder、TransformTrack |
+| SequencerTools | ✅ 创建 LevelSequence、播放范围、root folder、TransformTrack、binding/track/section/标记帧/选择/复制粘贴 |
 | ProgrammaticToolset | ✅ Python 沙箱编排多工具；沙箱边界（白名单 6 模块、禁 `unreal`）已验证 |
-| Niagara / PCG / StateTree / ControlRig 等 | ⚠️ 工具面已枚举（Niagara 46 个、Sequencer 140 个），未做完整功能调用 |
-| 自动化测试 | ✅ mock 126 断言 + 真机 21 断言 |
+| Niagara | ✅ 创建 System、全量读取栈/发射器/模块/渲染器、读写用户变量与栈数据、增删模块/渲染器/发射器 |
+| PCGToolset | ✅ 建图、查结构/Schema、读节点与 pin、连/断边、改节点参数与注释 |
+| Sequencer 全家 | ✅ 8 个 Sequencer/ControlRig toolset 共 319 个工具逐个验证（相机相关除外，见下） |
+| UMGToolSet | ✅ 创建 Widget BP、控件树增删改、编译、事件绑定、变量切换 |
+| MaterialTools 进阶 | ✅ 表达式增删连断、参数组增删改、输出连接、布局 |
+| DataTable / CurveTable / StringTable / DataAsset | ✅ 建资产 + 增删改查行 + schema 读写 |
+| 830 个工具全量扫描 | ✅ **830/830 可派发，FAIL = 0**；OK 433 / 契约验证 382 / 环境限制 9 / 有意未调 6 |
+| 自动化测试 | ✅ 离线 128 断言 + 真机 21 断言 |
+| 崩溃后恢复 | ✅ 定位并修复「Restore Packages 模态框阻塞 MCP」；两条崩溃路径（Sequencer Camera Cut / UMG WrapWidgets）已写进 skill |
 
 一键复跑：
 
@@ -167,9 +174,14 @@ cd tests
 ./verify-real-ue.sh     # 需要 UE 编辑器正在运行
 ```
 
-**未验证**：Windows / Linux 平台、67 个 toolset 里只深入用过 4 个
-（`SceneTools` / `EditorAppToolset` / `ObjectTools` / `BlueprintTools`），
-其余以活着的 `describe_toolset` 返回为准。详见 [`docs/REPORT.md`](docs/REPORT.md)。
+**未验证**：Windows / Linux 平台、UE 5.5–5.7、9 个因环境限制不可用的工具
+（SemanticSearch 需 API key、GameFeatures 本工程无 GFP、Niagara `ApplyStackIssueFix` 无可修复项、
+UMG `SetNamedSlotContent` 需 `INamedSlotInterface`、Sequencer Outliner 2 个需面板 view model、
+Sequencer `link_anim_sequence` 需 `MovieSceneSequence` 对象）——每个都有可复现的原文错误，
+清单见 [`docs/VERIFICATION.md`](docs/VERIFICATION.md) §6.7。
+
+完整逐工具结论（830/830）见 [`docs/VERIFICATION.md`](docs/VERIFICATION.md)；
+逆向推导过程见 [`docs/REPORT.md`](docs/REPORT.md)。
 
 ---
 

@@ -223,12 +223,33 @@ getter 同理（`GetEnabled`）。先按「去掉名字开头的 b」拼，报�
 | **UMGToolSet** | **camelCase** | `folderPath`、`assetName`、`parentClass`、`widgetBlueprint`、`widgetClass` |
 | **SequencerTools** | snake_case 但**命名独特** | 建序列是 `package_path` + **`asset_name`**（没有 `name`/`folder_name`）；`actor_class_path`、`track_type` |
 | MaterialInstanceTools | snake_case | `instance`、`name`、`value` |
+| **UMGToolSet** | camelCase，但 **class 参数的类型是反的** | `AddWidget.widgetClass` 要 **对象引用** `{"refPath":"/Script/UMG.Button"}`；`CreateWidgetBlueprint.parentClass` 要 **字符串** `"/Script/UMG.UserWidget"` |
+| Niagara 系 | 结构体引用 | `system` / `emitterName` / `scriptName` / `rendererIndex` 组成一个栈引用，**不是**一条软路径 |
+| PCGToolset | snake_case | `graph` / `node` / `fromPinLabel` / `toPinLabel`；pin 名要用 `GetNodeInfo` 读（Input 节点是 `In`，Output 节点是 `Out`） |
+| DataTableTools | 混用 | `set_rows.values` 是 **JSON 字符串**，`rename_rows.renames` 是 **JSON 对象** —— 两者相反 |
 
 **别猜参数名**：`describe_toolset` 会给出 `inputSchema.required` 和 `properties`，
 报错文本里也会附带完整 schema。**先看 schema 再调**，比试错快得多。
 
 另外注意：**工具名也可能和你想的不同**。例如材质的创建工具是 `create_material` 而不是 `create`，
 Blueprint 的创建工具才是 `create`。用 `describe_toolset` 列全量工具名确认。
+
+### 同一个操作，不同 toolset 的**参数形状**也不一样（真机实测）
+
+名字对了不代表形状对。以下都是实测踩出来的：
+
+| 现象 | 正确写法 |
+|---|---|
+| Niagara `SetRendererData` 的 `rendererData` | **对象里套 JSON 字符串**：`{"propertyValues": "<JSON 字符串>"}`；且只有部分属性可写（`SourceMode`/`MacroUVRadius` 可写，`Alignment` 不可写） |
+| Niagara 栈引用 | `{"system":{"refPath":...},"emitterName":"...","scriptName":"...","rendererIndex":0}` |
+| UMG `AddWidget` | `widgetClass` 用对象引用；**要嵌套必须显式传 `parentWidget`**，否则只能加到根 |
+| UMG `MoveWidget` | `widget` / `newParent` 都要**控件实例**的 refPath（`...:WidgetTree.Name`），`newParent` 必须是 `PanelWidget` |
+| UMG `SetNamedSlotContent` | `hostWidget` 必须实现 `INamedSlotInterface`；`widgetClass` 用对象引用 |
+| DataTable `get_rows` | `row_names: []` 会报 `Expecting value`；读全部用 `list_rows` |
+| DataTable `set_rows` | `values` 必须是 **JSON 对象**（`{"RowName":{...}}`），传数组报 `values must be a JSON object, got list.` |
+| DataTable `create` | `schema` 传 **UScriptStruct 纯字符串** `"/Script/UMG.RichTextStyleRow"`（传对象引用会被拒） |
+| PCG 连边 | `fromPinLabel`/`toPinLabel` 用 `GetNodeInfo` 读到的**真实** pin 名（Input 节点是 `In`，Output 节点是 `Out`） |
+| Sequencer `add_actors_by_name` | 传的是 actor 的 **label**，不是 refPath 尾段；先 `ActorTools.set_label` |
 
 ### 用 Python 编排多个工具（ProgrammaticToolset）
 
@@ -296,6 +317,14 @@ def run():
 | `Asset type does not support image capture` | `CaptureAssetImage` 只能截**支持缩略图**的资产类型（材质实例 ✅；Blueprint / LevelSequence / WidgetBlueprint ❌） | 换支持的资产类型；要看关卡就 `CaptureViewport` |
 | `ToolsetIsNotRegistered: <X> is not registered` | `execute_tool` 传了短 toolset 名 | 传全限定名，见「用 Python 编排多个工具」 |
 | 端口在 LISTEN 但每个请求被 reset / 无限挂住，编辑器窗口是开着的 | **崩溃后重启**弹了「Restore Packages」模态框，阻塞 game thread（不是 MCP 坏了！） | 点掉模态框，或按 `references/operations.md`「崩溃之后」清 `Saved/Autosaves` 后重启 |
+| 编辑器闪退，栈里有 `FCameraCutTrackEditor::Tick` | Sequencer 里有 `MovieSceneCameraCutTrack` 会触发 UE 5.8 断言 | 别加 camera cut track / 相机绑定；见 `references/operations.md` |
+| 编辑器闪退，栈里有 `FWidgetBlueprintOperationUtils::WrapWidgets` | `UMGToolSet.WrapWidgets` 在批量操作控件时踩空指针 | 不要用 `WrapWidgets`；`ReplaceWidgetWith*` 的 `widgetToReplace` 为空也会失败 |
+| `No stack issue with IssueId '…' was found` | Niagara 的 issue `fixes` 数组是空的 | 先 `GetStackIssues` 看 `fixes` 有没有内容 |
+| `GFP not found: <name>` | 本工程没启用任何 Game Feature Plugin | `ListDiscoveredGameFeaturePlugins` 返回空就是这个原因 |
+| `Embedding generation failed: HTTP 401 … You didn't provide an API key` | SemanticSearch 需要外部 embedding 服务与 API key | 本机没配就不可用；不是工具坏了 |
+| `The SemanticSearch index is empty` | 同上，索引没建 | 同上 |
+| `does not implement INamedSlotInterface` | UMG 宿主控件必须实现该接口 | 换控件类型，或换个目标 |
+| `is not valid MovieSceneSequence` | Sequencer `binding.sequence` 要 `MovieSceneSequence` 对象 | LevelSequence 的内部序列无法用软路径表达，这条路径在本机走不通 |
 
 **两种「缺参数」要分清**：`needs a default value` = 该参数是 `TOptional`，传 `null` 即可；
 `are required by the function input schema` = 真的必填，必须给值。

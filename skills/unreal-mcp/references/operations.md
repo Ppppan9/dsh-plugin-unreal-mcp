@@ -134,6 +134,11 @@ Web 侧边栏 **Plugins** → `Unreal Engine MCP` → 关掉再打开。
   root tile 还没加载完就解引用空指针 → SIGSEGV。对着 Cesium 的 actor 调 focus 之前先确认 tileset 已加载。
 - **UE Python Remote Execution 在 macOS 上会让编辑器启动卡死**（多播监听器），内存涨到 ~543MB 无响应。
   在 Mac 上别开 `bRemoteExecution`。
+- **UMG `WrapWidgets` 会崩编辑器（UE 5.8 真机复现）**：`UMGToolSet.WrapWidgets` 内部调
+  `FWidgetBlueprintOperationUtils::WrapWidgets` → `UWidgetTree::FindWidgetParent` → `UWidget::GetParent()`，
+  传入的控件引用若父链断裂就解引用空指针 → SIGSEGV（`access memory at address 0x38`）。
+  批量改控件树时不要用它；`ReplaceWidgetWith*` 系列在 `widgetToReplace` 为空时也会失败
+  （`None is not valid value for property 'WidgetToReplace'`）。
 - **Sequencer 的 Camera Cut 会崩编辑器（UE 5.8 真机复现）**：只要打开的 Level Sequence 里存在
   `MovieSceneCameraCutTrack`，`FCameraCutTrackEditor::Tick` → `FSequencer::SetGlobalTime` →
   MovieScene EntitySystem 求值就会踩
@@ -176,6 +181,17 @@ open -a "<UE>/Engine/Binaries/Mac/UnrealEditor.app" --args "<abs>/<Project>.upro
 ```
 
 转移而不是删除：自动存档里可能有用户没保存的关卡，交给用户自己决定要不要恢复。
+
+## 哪些功能在本机**不可用**（环境限制，不是工具坏了）
+
+| 工具 | 原因 | 怎么确认 |
+|---|---|---|
+| `SemanticSearchToolset.Search` / `FindSimilar` | 需要外部 embedding 服务与 API key | 报 `Embedding generation failed: HTTP 401` / `The SemanticSearch index is empty` |
+| `GameFeaturesToolset.IsGameFeatureActive` / `GetGameFeatureState` | 本工程没启用任何 Game Feature Plugin | `ListDiscoveredGameFeaturePlugins` 返回 `[]`，报 `GFP not found: <name>` |
+| `NiagaraToolset_System.ApplyStackIssueFix` | 该 issue 的 `fixes` 数组为空，没有可应用的修复项 | `GetStackIssues` 看 `fixes` 是否为 `[]` |
+| `UMGToolSet.SetNamedSlotContent` | 宿主控件必须实现 `INamedSlotInterface` | 报 `HostWidget 'X' does not implement INamedSlotInterface.` |
+| `SequencerOutlinerTools.get_outliner_children` / `is_node_expanded` | Outliner view model 只在面板内有效，且刚取到的节点也立刻失效 | 报 `SequencerModuleOutlinerScriptingObject: View Model is no longer valid.` |
+| `SequencerImportExportTools.link_anim_sequence` | `binding.sequence` 要 `MovieSceneSequence` 对象，但 LevelSequence 的内部序列无法用软路径表示 | 报 `is not valid MovieSceneSequence for property 'Sequence'` |
 
 ## 崩溃日志在哪
 
