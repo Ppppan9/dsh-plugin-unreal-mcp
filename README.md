@@ -163,6 +163,7 @@ UE 默认开启 **Tool Search 模式**，所以 `tools/list` 里**只有 3 个�
 | MaterialTools 进阶 | ✅ 表达式增删连断、参数组增删改、输出连接、布局 |
 | DataTable / CurveTable / StringTable / DataAsset | ✅ 建资产 + 增删改查行 + schema 读写 |
 | 830 个工具全量扫描 | ✅ **830/830 可派发，FAIL = 0**；OK 433 / 契约验证 382 / 环境限制 9 / 有意未调 6 |
+| SemanticSearch（向量检索） | ✅ **已跑通**：DeepSeek 看图 caption + 本机 llama.cpp 做向量，`Search` / `FindSimilar` 均返回语义排序结果（见 `tools/setup-semanticsearch.sh`） |
 | 自动化测试 | ✅ 离线 128 断言 + 真机 21 断言 |
 | 崩溃后恢复 | ✅ 定位并修复「Restore Packages 模态框阻塞 MCP」；两条崩溃路径（Sequencer Camera Cut / UMG WrapWidgets）已写进 skill |
 
@@ -174,11 +175,12 @@ cd tests
 ./verify-real-ue.sh     # 需要 UE 编辑器正在运行
 ```
 
-**未验证**：Windows / Linux 平台、UE 5.5–5.7、9 个因环境限制不可用的工具
-（SemanticSearch 需 API key、GameFeatures 本工程无 GFP、Niagara `ApplyStackIssueFix` 无可修复项、
+**未验证**：Windows / Linux 平台、UE 5.5–5.7、8 个因环境限制不可用的工具
+（GameFeatures 本工程无 GFP、Niagara `ApplyStackIssueFix` 无可修复项、
 UMG `SetNamedSlotContent` 需 `INamedSlotInterface`、Sequencer Outliner 2 个需面板 view model、
 Sequencer `link_anim_sequence` 需 `MovieSceneSequence` 对象）——每个都有可复现的原文错误，
 清单见 [`docs/VERIFICATION.md`](docs/VERIFICATION.md) §6.7。
+SemanticSearch 原本也在这张表里，现已用 `tools/setup-semanticsearch.sh` 跑通（§6.10）。
 
 完整逐工具结论（830/830）见 [`docs/VERIFICATION.md`](docs/VERIFICATION.md)；
 逆向推导过程见 [`docs/REPORT.md`](docs/REPORT.md)。

@@ -321,7 +321,10 @@ def run():
 | 编辑器闪退，栈里有 `FWidgetBlueprintOperationUtils::WrapWidgets` | `UMGToolSet.WrapWidgets` 在批量操作控件时踩空指针 | 不要用 `WrapWidgets`；`ReplaceWidgetWith*` 的 `widgetToReplace` 为空也会失败 |
 | `No stack issue with IssueId '…' was found` | Niagara 的 issue `fixes` 数组是空的 | 先 `GetStackIssues` 看 `fixes` 有没有内容 |
 | `GFP not found: <name>` | 本工程没启用任何 Game Feature Plugin | `ListDiscoveredGameFeaturePlugins` 返回空就是这个原因 |
-| `Embedding generation failed: HTTP 401 … You didn't provide an API key` | SemanticSearch 需要外部 embedding 服务与 API key | 在 Project Settings → Plugins → Semantic Search 填 `EmbeddingApiKey` / `CaptioningApiKey`；或把 BaseUrl 指向本机 Ollama（key 随便填）。详见 `references/operations.md`「怎么给 SemanticSearch 配 API key」 |
+| `Embedding generation failed: HTTP 401 … You didn't provide an API key` | SemanticSearch 需要外部 embedding 服务与 API key | 在 Project Settings → Plugins → Semantic Search 填 `EmbeddingApiKey` / `CaptioningApiKey`；或用本仓库的 `tools/setup-semanticsearch.sh`（DeepSeek 看图 + 本机向量，零成本，已实测跑通）。详见 `references/operations.md` |
+| `check(QueryVector.Num() == Dimension)` 断言 + 编辑器闪退 | 运行中改了 `EmbeddingDimension`，UE 拿旧维度索引查新维度向量 | **维度必须在编辑器启动前定好**；改完删掉 `<Project>/Saved/SemanticSearch/SearchIndex.bin` 再重启 |
+| `Indexing failed … Thumbnail compressor is null` | 该资产没有缩略图，索引器拿不到图 | 复制/重复出来的资产常无缩略图；换成材质、静态网格等自带缩略图的资产 |
+| `The SemanticSearch index is empty` | 索引还没建 | 保存一个带缩略图的资产（`bAutoIndexOnSave=True` 会自动建），或控制台 `SemanticSearch.IndexAll` |
 | `The SemanticSearch index is empty` | 同上，索引没建 | 同上 |
 | `does not implement INamedSlotInterface` | UMG 宿主控件必须实现该接口 | 换控件类型，或换个目标 |
 | `is not valid MovieSceneSequence` | Sequencer `binding.sequence` 要 `MovieSceneSequence` 对象 | LevelSequence 的内部序列无法用软路径表达，这条路径在本机走不通 |

@@ -280,7 +280,66 @@ await callTool('call_tool', {
 **建索引**：在 UE 控制台执行 `SemanticSearch.IndexAll`（会把 `IndexedPaths` 下的资产送去生成
 caption + embedding）；`SemanticSearch.IndexStats` 看索引状态。
 `IndexedPaths` 默认是 `/`（整个工程）。控制台命令**没有**对应的 MCP 工具，
-需要用 UE 自带的 `ExecuteConsoleCommand`（Python）或者手工在 UE 控制台里敲。
+需要用 UE 自生的 `ExecuteConsoleCommand`（Python）或者手工在 UE 控制台里敲。
+
+> 💡 **不想开控制台也能建索引**：`bAutoIndexOnSave=True`（默认）时，
+> **保存一个资产就会自动给它建索引**。用 MCP 触发就是
+> `AssetTools.save_assets({asset_paths:['/Game/...']})`，等几秒后看日志出现
+> `Successfully stored semantic data in DDC for: <资产路径>` 即成功。
+> ⚠️ 资产**必须有缩略图**否则会 `Indexing failed … Thumbnail compressor is null`
+> （重复/复制出来的资产常常没有缩略图；材质、静态网格一般都有）。
+
+---
+
+## 🟢 已验证的「零成本」方案：DeepSeek 做看图 + 本机做向量
+
+**实测结论（2026-10-20，UE 5.8 + DeepSeek + 本机 llama.cpp）**：
+
+| 需求 | DeepSeek 能不能干 | 实测结果 |
+|---|---|---|
+| 看图 caption | ✅ 能 | `deepseek-flash` 的 `input_modalities` 含 `image`；发 `image_url` 能正确描述图片 |
+| `json_schema` 结构化输出 | ❌ **不能** | HTTP 400 `This response_format type is unavailable now`（只支持 `json_object`） |
+| 向量 embedding | ❌ **完全没有** | `/embeddings`、`/v1/embeddings`、`/embed` 全部 HTTP 404 |
+
+所以**不能直接换成 DeepSeek**：需要两处适配。本仓库已经把它做好了：
+
+* `tools/semanticsearch-shim.py` —— 把 UE 硬编码的 `json_schema` 翻译成 `json_object`
+  （把 schema 注入 system prompt，再校验/修复模型返回的 JSON），
+  并把 `/embeddings` 转发到本机 embedding 服务。两个服务对外表现成**一个** OpenAI 端点。
+* `tools/setup-semanticsearch.sh` —— 一键装 llama.cpp + 拉 Qwen3-Embedding-0.6B（~640 MB）
+  + 启动 embedding 服务与 shim。
+
+```bash
+export SHIM_UPSTREAM_BASE=https://api.deepseek.com
+export SHIM_UPSTREAM_KEY=sk-你的key        # 任何「支持看图 + json_object」的模型
+./tools/setup-semanticsearch.sh
+```
+
+UE 里填（`Project Settings → Plugins → Semantic Search`）：
+
+```
+CaptioningBaseUrl   = http://127.0.0.1:8765/v1
+CaptioningApiKey    = local          # 任意非空字符串，插件不校验
+CaptioningModel     = deepseek-flash
+EmbeddingBaseUrl    = http://127.0.0.1:8765/v1
+EmbeddingApiKey     = local
+EmbeddingModel      = qwen3-embedding
+EmbeddingDimension  = 1024           # 必须 = 本机服务真实返回的向量长度
+```
+
+**本机侧已实测跑通**：`llama-server --embedding` + Qwen3-Embedding-0.6B → 1024 维；
+`Search('sphere')` 返回按语义排序的命中（`Sphere` / `EditorCube` / `M_SemTest` / `MatineeCam_SM`），
+每条都带 DeepSeek 生成的 caption；`FindSimilar(EditorCube)` 也能返回相似资产。
+
+### ⚠️ 两个会踩的坑
+
+1. **`EmbeddingDimension` 必须在编辑器启动前定好。**
+   运行中改维度 → UE 用旧维度的索引查新维度的向量 →
+   `FlatVectorIndex.cpp` 的 `check(QueryVector.Num() == Dimension)` 断言 → **编辑器直接崩**。
+   改完请删掉 `<Project>/Saved/SemanticSearch/SearchIndex.bin` 再重启编辑器。
+2. **llama.cpp 会忽略请求里的 `dimensions`**，返回它模型自己的长度。
+   所以 `EmbeddingDimension` 必须填**服务端真实长度**（Qwen3-Embedding-0.6B = 1024），
+   而不是抄 OpenAI 的 512。填错就是上面那个崩溃。
 | `GameFeaturesToolset.IsGameFeatureActive` / `GetGameFeatureState` | 本工程没启用任何 Game Feature Plugin | `ListDiscoveredGameFeaturePlugins` 返回 `[]`，报 `GFP not found: <name>` |
 | `NiagaraToolset_System.ApplyStackIssueFix` | 该 issue 的 `fixes` 数组为空，没有可应用的修复项 | `GetStackIssues` 看 `fixes` 是否为 `[]` |
 | `UMGToolSet.SetNamedSlotContent` | 宿主控件必须实现 `INamedSlotInterface` | 报 `HostWidget 'X' does not implement INamedSlotInterface.` |

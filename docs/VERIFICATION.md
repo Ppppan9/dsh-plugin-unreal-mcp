@@ -419,8 +419,8 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 
 | 工具 | 复验后的真实原因 | 属于什么性质 |
 |---|---|---|
-| `SemanticSearchToolset.Search` | `Embedding generation failed: HTTP 401 … You didn't provide an API key` | **需要外部 embedding 服务与 API key**（本机未配置）。已定位到引擎侧根因与配置位置，见 §6.9 |
-| `SemanticSearchToolset.FindSimilar` | `The SemanticSearch index is empty — nothing to compare against.` | 同上：索引为空也是因为没建索引，而建索引同样要 embedding 服务（见 §6.9） |
+| `SemanticSearchToolset.Search` | `Embedding generation failed: HTTP 401 … You didn't provide an API key` | **需要外部 embedding 服务与 API key**（本机未配置）。已定位到引擎侧根因与配置位置，见 §6.9。**后已用「DeepSeek 看图 + 本机 llama.cpp 向量」方案跑通，见 §6.10** |
+| `SemanticSearchToolset.FindSimilar` | `The SemanticSearch index is empty — nothing to compare against.` | 同上：索引为空也是因为没建索引，而建索引同样要 embedding 服务（见 §6.9 / §6.10） |
 | `GameFeaturesToolset.IsGameFeatureActive` | `GFP not found: Niagara` | 本工程**没有启用任何 Game Feature Plugin**（`ListDiscoveredGameFeaturePlugins` 返回 `[]`） |
 | `GameFeaturesToolset.GetGameFeatureState` | `GFP not found: AbilitySystemGameFeatureActions` | 同上 |
 | `NiagaraToolset_System.ApplyStackIssueFix` | `No stack issue with IssueId '…' was found. Use GetStackIssues to obtain current IssueIds.` | 该 issue 的 `fixes` 数组为**空**（`GetStackIssues` 返回 `fixes: []`），没有可应用的修复项 |
@@ -496,6 +496,57 @@ ConfigSettingsToolset.SetSectionProperties({
 > 验证过程中用占位 key 测过这条路径，事后已把该 ini 恢复原状。
 > 另外插件日志会打印 `LogSemanticSearch: OpenAIEmbeddingProvider created (..., EMBED API KEY MISSING)`，
 > 配好 key 后这行仍会打印 model 与 base URL。
+
+### 6.10 【已跑通】零成本方案：DeepSeek 看图 + 本机 llama.cpp 做向量
+
+**问题**：§6.9 说「需要两个 OpenAI 兼容服务」。能不能用现成的 DeepSeek 顶掉其中一个？
+**实测答案：DeepSeek 能顶 caption，但顶不了 embedding，且需要一处适配。**
+
+| 需求 | DeepSeek 实测结果 |
+|---|---|
+| 看图 caption | ✅ `deepseek-flash` 的 `input_modalities = ["text","image"]`；发 `image_url` 能正确描述图片 |
+| `json_schema` 结构化输出 | ❌ HTTP 400 `This response_format type is unavailable now`（只支持 `json_object`） |
+| 向量 embedding | ❌ `/embeddings`、`/v1/embeddings`、`/embed` **全部 HTTP 404**；`deepseek-embed` 模型名也不存在 |
+
+UE 5.8 把 `response_format: {type:"json_schema", json_schema:{...,"strict":true}}` **硬编码**在
+`OpenAIEmbeddingProvider.cpp` 里，没法通过设置绕开。所以做了两处适配并**实测跑通**：
+
+| 交付物 | 作用 |
+|---|---|
+| `tools/semanticsearch-shim.py` | 把 `json_schema` 翻译成 `json_object`（schema 注入 system prompt，再校验/修复模型返回的 JSON，确保 UE 严格的 `{tags:[string],caption:string}` 解析器能过），并把 `/embeddings` 转发到本机 embedding 服务。两个服务对外表现成**一个** OpenAI 端点 |
+| `tools/setup-semanticsearch.sh` | 一键装 llama.cpp + 拉 Qwen3-Embedding-0.6B（~640 MB）+ 启动两个服务 |
+
+**实测通过的证据**：
+
+```
+LogSemanticSearch: Successfully stored semantic data in DDC for: /Game/MCPV_SEM/M_SemTest.M_SemTest
+LogSemanticSearch: Successfully stored semantic data in DDC for: /Game/MCPV_SEM/EditorCube.EditorCube
+```
+
+| 调用 | 结果 |
+|---|---|
+| `Search("sphere")` | 4 命中，语义序：`Sphere` → `EditorCube` → `M_SemTest` → `MatineeCam_SM` |
+| `Search("cube")` | 4 命中，首位是 `EditorCube` |
+| `Search("camera")` | 4 命中，首位是 `MatineeCam_SM` |
+| `Search("metal material")` | 4 命中，首位是 `M_SemTest` |
+| `FindSimilar(EditorCube)` | 3 命中：`Sphere` / `M_SemTest` / `MatineeCam_SM` |
+| 每条结果 | 都带 DeepSeek 生成的 caption，例如 `"A plain, neutral gray material with a matte finish, showing subtle checkered tonal variation…"` |
+
+**配置**（`Project Settings → Plugins → Semantic Search`）：
+`CaptioningBaseUrl` / `EmbeddingBaseUrl` = `http://127.0.0.1:8765/v1`，
+`CaptioningModel` = `deepseek-flash`，`EmbeddingModel` = `qwen3-embedding`，
+`EmbeddingDimension` = **1024**（本机服务真实长度）。
+
+**踩到的两个坑（都已写进 skill）**：
+
+1. **`EmbeddingDimension` 必须在编辑器启动前定好。** 运行中改维度 → UE 拿旧维度索引查新维度向量 →
+   `FlatVectorIndex.cpp:70` 的 `check(QueryVector.Num() == Dimension)` 断言 → **编辑器直接崩**
+   （这是本轮实测到的第 3 条崩溃路径）。
+2. **llama.cpp 忽略请求里的 `dimensions`**，返回模型自己的长度。
+   所以 `EmbeddingDimension` 必须填**服务端真实长度**（Qwen3-Embedding-0.6B = 1024），
+   不能抄 OpenAI 的 512 —— 填错就是上面那个崩溃。
+3. 附带发现：**资产没有缩略图就建不了索引**（`Indexing failed … Thumbnail compressor is null`），
+   复制/重复出来的资产常常没有缩略图；材质、静态网格一般都有。
 
 ## 6.8 验证结束时的环境清理确认
 
