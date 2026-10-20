@@ -10,7 +10,7 @@
 | 工程 | `UE5McpTest.uproject`（`/Users/houtao/Minimax/rea_ue/ue-test-project`） |
 | MCP 端点 | `http://127.0.0.1:8000/mcp`（streamable-http，Tool Search 模式） |
 | 工具面规模 | **52 个 toolset / 830 个工具**（`list_toolsets` + `describe_toolset` 全量枚举） |
-| 逐工具结论 | **OK 433 / 契约验证 382 / BLOCKED 9 / 有意未调 6 / FAIL 0**（见 §4.6） |
+| 逐工具结论 | **OK 435 / 契约验证 382 / BLOCKED 7 / 有意未调 6 / FAIL 0**（见 §4.6） |
 | 验证日期 | 2026-10-20 |
 | 结论 | 830 个工具的**参数契约 100% 可派发**；**写入类闭环**按家族逐项验证；**3 个引擎侧缺陷 + 2 个崩溃路径**已复现并写进 skill |
 
@@ -23,7 +23,7 @@
 | A. DSH 插件自身功能 | 3 个 skill 注册、prompt section 注入、工具注册、`UNREAL_MCP_PORT` 覆盖、断线自动重连、locale/icon/许可 | ✅ 全部通过（离线 128 断言 + 真 runtime 21 断言） |
 | B. 线路与元工具 | `list_toolsets`(Markdown) / `describe_toolset`(JSON) / `call_tool`(JSON 字符串)、双层 JSON、`isError` 语义 | ✅ 全部通过 |
 | C. 830 工具可达性 | 对 830 个工具逐个派发：735 个用「空参 schema 守卫」证明**可达且参数被校验**（零副作用），89 个真调用成功，19 个故意不调（见 §4.3） | ✅ 830/830 可达，0 个「工具不存在」 |
-| D. 写入闭环 | 逐家族做「创建→读回→修改→读回→清理」 | ✅ 见 §5；**830 个工具全部有结论，FAIL = 0**；9 个 BLOCKED 全部是环境限制（无该资产 / 需外部 API key / 引擎缺省值缺陷），不是插件问题 |
+| D. 写入闭环 | 逐家族做「创建→读回→修改→读回→清理」 | ✅ 见 §5；**830 个工具全部有结论，FAIL = 0**；7 个 BLOCKED 全部是环境限制（无该资产 / 引擎缺省值缺陷 / 引擎接口限制），不是插件问题 |
 | E. 崩溃与恢复 | 复现 2 条崩溃路径 + 崩溃后 MCP「假死」的真因 | ⚠️ 已全部定位并写入 skill（引擎缺陷，非本插件可修） |
 
 **一句话**：插件这一侧（DSH 集成、线路、参数契约、错误语义）没有未通过项；
@@ -204,9 +204,9 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 
 | 结论 | 数量 | 含义 |
 |---|---|---|
-| `OK` | **433** | 真调用成功，且返回值与工具名/描述一致；写类工具都做了「写→读回」闭环 |
+| `OK` | **435** | 真调用成功，且返回值与工具名/描述一致；写类工具都做了「写→读回」闭环 |
 | `VALIDATED_REQUIRED` | **382** | 真调用过，引擎因**必填参数缺失**拒绝了（这证明工具存在、派发通、schema 被强制执行；零副作用） |
-| `BLOCKED` | **9** | 用**正确参数**复验过仍无法完成，原因见 §6.7，全部是环境限制 |
+| `BLOCKED` | **7** | 用**正确参数**复验过仍无法完成，原因见 §6.7，全部是环境限制 |
 | 有意未调 | **6** | 零必填参数的**写类**工具，空参可能真的执行写操作；改由家族闭环覆盖 |
 | `FAIL` | **0** | — |
 
@@ -222,7 +222,7 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 | SYS（Niagara / PCG / Plugin / GAS / Dataflow…） | 25 | 237 | 124 | 108 | 0 | 5 |
 | ASSET（Blueprint / Material / Asset / UMG / Scene…） | 16 | 247 | 98 | 148 | 0 | 1 |
 | LEAD（EditorApp / Logs / Programmatic） | 3 | 27 | 27 | 0 | 0 | 0 |
-| **合计** | **52** | **830** | **433** | **382** | **6** | **9** |
+| **合计** | **52** | **830** | **435** | **382** | **6** | **7** |
 
 **逐 toolset**：
 
@@ -241,7 +241,7 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 | `DataflowAgentToolset` | 22 | 2 | 20 | 0 | 0 |
 | `EditorAppToolset` | 21 | 21 | 0 | 0 | 0 |
 | `LogsToolset` | 4 | 4 | 0 | 0 | 0 |
-| `SemanticSearchToolset` | 2 | 0 | 0 | 0 | 2 |
+| `SemanticSearchToolset` | 2 | 2 | 0 | 0 | 0 |
 | `PluginToolset` | 17 | 11 | 6 | 0 | 0 |
 | `GameFeaturesToolset` | 7 | 3 | 2 | 0 | 2 |
 | `AutomationTestToolset` | 7 | 5 | 2 | 0 | 0 |
@@ -413,14 +413,15 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 
 ---
 
-### 6.7 9 个 BLOCKED 工具的完整清单（都不是插件问题）
+### 6.7 7 个 BLOCKED 工具的完整清单（都不是插件问题）
+
+> 原先 9 个；其中 `SemanticSearchToolset.Search` / `FindSimilar` 已用 §6.10 的
+> 「DeepSeek 看图 + 本机向量」方案**跑通**，从本表移除。
 
 每个都用**正确参数**复验过，仍无法完成，原因逐条如下：
 
 | 工具 | 复验后的真实原因 | 属于什么性质 |
 |---|---|---|
-| `SemanticSearchToolset.Search` | `Embedding generation failed: HTTP 401 … You didn't provide an API key` | **需要外部 embedding 服务与 API key**（本机未配置）。已定位到引擎侧根因与配置位置，见 §6.9。**后已用「DeepSeek 看图 + 本机 llama.cpp 向量」方案跑通，见 §6.10** |
-| `SemanticSearchToolset.FindSimilar` | `The SemanticSearch index is empty — nothing to compare against.` | 同上：索引为空也是因为没建索引，而建索引同样要 embedding 服务（见 §6.9 / §6.10） |
 | `GameFeaturesToolset.IsGameFeatureActive` | `GFP not found: Niagara` | 本工程**没有启用任何 Game Feature Plugin**（`ListDiscoveredGameFeaturePlugins` 返回 `[]`） |
 | `GameFeaturesToolset.GetGameFeatureState` | `GFP not found: AbilitySystemGameFeatureActions` | 同上 |
 | `NiagaraToolset_System.ApplyStackIssueFix` | `No stack issue with IssueId '…' was found. Use GetStackIssues to obtain current IssueIds.` | 该 issue 的 `fixes` 数组为**空**（`GetStackIssues` 返回 `fixes: []`），没有可应用的修复项 |
@@ -429,10 +430,12 @@ call_tool({toolset_name: <toolset>, tool_name: <tool>, arguments: {}})
 | `SequencerOutlinerTools.is_node_expanded` | 同上 | 同上 |
 | `SequencerImportExportTools.link_anim_sequence` | `… is not valid MovieSceneSequence for property 'Sequence'` | 引擎限制：`binding.sequence` 要的是 `MovieSceneSequence` 对象，但 `LevelSequence` 的内部序列**无法用软路径表示**，试过 `MovieScene_0` / `MovieScene` / `MovieSceneSequence` / 直接传 LevelSequence 全部失败 |
 
-**结论**：830 个工具里**没有一个是坏的**。9 个 BLOCKED 全部是「本机/本工程缺前置条件」或「UE 5.8 引擎侧限制」，
+**结论**：830 个工具里**没有一个是坏的**。7 个 BLOCKED 全部是「本机/本工程缺前置条件」或「UE 5.8 引擎侧限制」，
 且每条都给出了可复现的原文错误。插件这一侧（DSH 集成、线路、参数契约、错误语义、重连）**零缺陷**。
 
 ### 6.9 SemanticSearch 的 API key 依赖：已定位到确切位置与获取方式
+
+> **这一节记录的是「需要什么」的分析；§6.10 是「不用花钱也能跑」的最终解法（已实测通过）。**
 
 这是 9 个 BLOCKED 里唯一一个「用户可以自己解决」的，所以单独查清楚了源码：
 
